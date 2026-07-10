@@ -39,6 +39,15 @@ def categoria(tcs):
     if "bens" in s.lower(): return "Fornecimento de bens"
     return "Outros"
 
+def is_fisc(obj, cpvs):
+    if re.search(r"fiscaliza", obj or "", re.I): return True
+    for c in (cpvs or []):
+        c=str(c)
+        if re.search(r"fiscaliza|supervis", c, re.I): return True
+        code=c.split(" ")[0].split("-")[0]
+        if code[:5] in ("71247","71248","71520","71521"): return True
+    return False
+
 # ---------- Fonte 1: oficial ----------
 def oficial(ano):
     meta=json.loads(http_get(f"https://dados.gov.pt/api/1/datasets/{DATASET_ID}/"))
@@ -56,7 +65,12 @@ def oficial(ano):
         try: preco=float(r.get("PrecoBase")) if r.get("PrecoBase") not in (None,"") else None
         except Exception: preco=None
         ta=r.get("tipoActo")
-        cat = "Alterações de procedimento" if ta=="Anúncio de Alteração" else categoria(r.get("tiposContrato"))
+        if ta=="Anúncio de Alteração":
+            cat="Alterações de procedimento"
+        elif is_fisc(r.get("descricaoAnuncio"), r.get("CPVs")):
+            cat="Serviços de fiscalização"
+        else:
+            cat=categoria(r.get("tiposContrato"))
         out.append({"n":r.get("nAnuncio"),"data":dp,"ent":r.get("designacaoEntidade"),"nif":r.get("nifEntidade"),
             "obj":r.get("descricaoAnuncio"),"preco":preco,"cpv":r.get("CPVs"),"proc":r.get("modeloAnuncio"),
             "prazo":r.get("PrazoPropostas"),"dlim":iso(r.get("DataLimitePropostas","") or ""),
@@ -83,7 +97,7 @@ def extrair(t, href):
         "plat":g(r"Plataforma eletr[óo]nica[^:\n]*:\s*([^\n]+)"),
         "lotes":["Sim"] if re.search(r"Procedimento com lotes\s*\?\s*Sim",t,re.I) else None,"amb":"",
         "urg":1 if re.search(r"concurso p[úu]blico urgente",t,re.I) else 0,
-        "cat":categoria(tc),"pdf":"https://diariodarepublica.pt"+href}
+        "cat":("Serviços de fiscalização" if is_fisc(obj,[g(r"Vocabul[áa]rio [Pp]rincipal:\s*([^\n]+)")]) else categoria(tc)),"pdf":"https://diariodarepublica.pt"+href}
 
 async def dr_ao_vivo(de, ate):
     from playwright.async_api import async_playwright

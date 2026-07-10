@@ -18,7 +18,19 @@
   header h1{margin:0;font-size:17px;font-weight:600}
   header .resumo{font-size:13px;opacity:.92}
   #info{margin-left:auto;font-size:12px;padding:4px 12px;border-radius:20px;background:rgba(255,255,255,.15)}
+  #verifBox{display:flex;align-items:center;gap:7px;font-size:12px}
+  #verifBox label{opacity:.9}
+  #verifBox select{font-size:12px;padding:3px 6px;border-radius:6px;border:none}
+  .semaforo{width:22px;height:22px;border-radius:50%;border:2px solid rgba(255,255,255,.7);cursor:pointer;padding:0;background:#c0392b;box-shadow:0 0 6px rgba(0,0,0,.25) inset}
+  .semaforo.verde{background:#27ae60}
   main{max-width:1440px;margin:0 auto;padding:14px 22px 60px}
+  #aviso{display:none;align-items:center;gap:12px;background:#fdecea;border:1px solid #f5c6c0;color:#8a2a20;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:13px;flex-wrap:wrap}
+  #aviso.ok{background:#e7f6ee;border-color:#bfe6cf;color:#186a3b}
+  #aviso .acao{margin-left:auto}
+  /* botões mais pequenos no primeiro quadro */
+  .painel-topo button.acao{padding:5px 9px;font-size:12px}
+  .painel-topo input[type=date]{padding:5px 7px;font-size:12px}
+  .painel-topo input[type=search]{padding:5px 9px;font-size:12.5px;min-width:220px}
 
   .painel{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-bottom:10px;
     display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap}
@@ -72,6 +84,7 @@
   .grupo-cab.Servicos{background:var(--serv-bg);color:var(--serv)}
   .grupo-cab.Fornecimento{background:var(--forn-bg);color:var(--forn)}
   .grupo-cab.Concessoes{background:var(--conc-bg);color:var(--conc)}
+  .grupo-cab.Fiscalizacao{background:#e6f7fb;color:#0a6a86}
   .grupo-cab.Alteracoes{background:#fff3e0;color:#8a5a00}
   .grupo-cab.Outros{background:var(--outros-bg);color:var(--outros)}
   .grupo .tabela-wrap{display:none}
@@ -96,10 +109,14 @@
   a.dr:hover{text-decoration:underline}
   .pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11.5px;background:#eef1f6;white-space:nowrap}
   .pill.urg{background:#fdefe3;color:var(--warn)}
-  select.estado{padding:4px 6px;font-size:12px;border-radius:6px;min-width:112px}
-  select.estado.v-analisar{border-color:#4a90d9;color:#1c5fa8;background:#eaf3fc}
-  select.estado.v-concorrer{border-color:#3aa06a;color:#187244;background:#e7f6ee}
-  select.estado.v-descartado{border-color:#aab;color:#667;background:#f0f1f4}
+  .marc-cell{display:flex;gap:3px;white-space:nowrap}
+  .mk{border:1px solid var(--line);background:#fff;border-radius:6px;padding:3px 6px;font-size:14px;line-height:1;cursor:pointer;filter:grayscale(1);opacity:.5}
+  .mk:hover{opacity:1;filter:none}
+  .mk.on{opacity:1;filter:none;border-width:2px;padding:2px 5px}
+  .mk-analisar.on{border-color:#4a90d9;background:#eaf3fc}
+  .mk-concorrer.on{border-color:#3aa06a;background:#e7f6ee}
+  .mk-descartado.on{border-color:#99a;background:#eef0f4}
+  .mk-decl.on{border-color:#b3540a;background:#fdefe3}
   td input[type=checkbox]{width:15px;height:15px;cursor:pointer}
   tr.detalhe td{background:#fbfcfe;padding:14px 20px}
   .det-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(255px,1fr));gap:10px 26px;font-size:13px}
@@ -118,9 +135,15 @@
   <h1>Anúncios Concursos DR</h1>
   <span class="resumo" id="resumo"></span>
   <span id="info"></span>
+  <span id="verifBox">
+    <label>Sou:</label>
+    <select id="euSel"><option value="">—</option><option value="SAFSM">SAFSM</option><option value="JMF">JMF</option></select>
+    <button id="semaforo" class="semaforo" title="Estado de verificação"></button>
+  </span>
 </header>
 <main>
-  <div class="painel">
+  <div id="aviso"></div>
+  <div class="painel painel-topo">
     <div class="campo">
       <label>Ver — de</label>
       <input type="date" id="vDe">
@@ -173,8 +196,8 @@
 
 <script>
 let META={gerado:"",de:"",ate:"",janela:120,n:0};
-const CATS=["Obras","Serviços","Fornecimento de bens","Concessões","Alterações de procedimento","Outros"];
-const CLS={"Obras":"Obras","Serviços":"Servicos","Fornecimento de bens":"Fornecimento","Concessões":"Concessoes","Alterações de procedimento":"Alteracoes","Outros":"Outros"};
+const CATS=["Obras","Serviços","Serviços de fiscalização","Fornecimento de bens","Concessões","Alterações de procedimento","Outros"];
+const CLS={"Obras":"Obras","Serviços":"Servicos","Serviços de fiscalização":"Fiscalizacao","Fornecimento de bens":"Fornecimento","Concessões":"Concessoes","Alterações de procedimento":"Alteracoes","Outros":"Outros"};
 let REGS=[];      // todos os anúncios (vindos do ficheiro dados.json.gz no mesmo servidor)
 
 /* ---------- utilitários ---------- */
@@ -187,10 +210,11 @@ function slug(n){ return "a"+String(n).replace(/[^a-zA-Z0-9]/g,"_"); }
 const MARC_BASE="adr-safsm-marc-9f3k7q2m8w4z6t1c";  // chave privada da SUA lista de marcações
 let MARC={};
 try{ MARC=JSON.parse(localStorage.getItem("adr_marcacoes")||"{}"); }catch(e){ MARC={}; }
-function anot(n){ return MARC[n]||{estado:"",obs:""}; }
+function anot(n){ const a=MARC[n]||{}; return {estado:a.estado||"",obs:a.obs||"",decl:a.decl||0}; }
 function guardarMarc(){ try{ localStorage.setItem("adr_marcacoes",JSON.stringify(MARC)); }catch(e){} }
 function setEstado(n,v){ const a=anot(n); a.estado=v; MARC[n]=a; guardarMarc(); agendarPush(); }
 function setObs(n,v){ const a=anot(n); a.obs=v; MARC[n]=a; guardarMarc(); agendarPush(); }
+function setDecl(n,v){ const a=anot(n); a.decl=v; MARC[n]=a; guardarMarc(); agendarPush(); }
 /* --- sincronização na nuvem (textdb) --- */
 async function _gz64(str){ const gz=await new Response(new Blob([str]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer(); let b=""; new Uint8Array(gz).forEach(x=>b+=String.fromCharCode(x)); return btoa(b); }
 async function _ungz64(b64){ const bin=Uint8Array.from(atob(b64),c=>c.charCodeAt(0)); return await new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream("gzip"))).text(); }
@@ -218,6 +242,39 @@ async function empurrarMarc(){
     await fetch("https://textdb.online/update/?key="+encodeURIComponent(MARC_BASE+"-m-meta")+"&value="+_enc2(JSON.stringify({n:blocks.length})),{mode:"no-cors"});
   }catch(e){}
   _pushing=false;
+}
+
+/* ---------- verificação (semáforo partilhado) ---------- */
+const PESSOAS={SAFSM:"sfmachado@sa-machado.com", JMF:"jmfaria@sa-machado.com"};
+let EU=""; try{ EU=localStorage.getItem("adr_eu")||""; }catch(e){}
+let VERIF={por:"",em:"",alvo:""};
+function alvoAtual(){ return META.ate||""; }
+async function lerVerif(){ try{ const t=await _lerM(MARC_BASE+"-v",2); if(t){ VERIF=JSON.parse(t); return true; } }catch(e){} return false; }
+async function escreverVerif(){ try{ await fetch("https://textdb.online/update/?key="+encodeURIComponent(MARC_BASE+"-v")+"&value="+_enc2(JSON.stringify(VERIF)),{mode:"no-cors"}); }catch(e){} }
+function marcarVerificado(){
+  if(!EU){ alert("Escolha primeiro quem é, no canto superior direito («Sou:»)."); const s=document.getElementById("euSel"); s.focus(); return; }
+  VERIF={por:EU, em:new Date().toISOString(), alvo:alvoAtual()};
+  escreverVerif(); renderVerif();
+}
+function renderVerif(){
+  const alvo=alvoAtual();
+  const verificado = VERIF.alvo && VERIF.alvo===alvo && VERIF.por;
+  const sem=document.getElementById("semaforo"); if(!sem) return;
+  sem.classList.toggle("verde",!!verificado);
+  const av=document.getElementById("aviso");
+  if(verificado){
+    const dt=new Date(VERIF.em||Date.now());
+    const dia=dt.toLocaleDateString("pt-PT"), hora=dt.toLocaleTimeString("pt-PT",{hour:"2-digit",minute:"2-digit"});
+    sem.title=`Verificado por ${VERIF.por} em ${dia} ${hora}`;
+    av.className="ok"; av.style.display="flex";
+    av.innerHTML=`🟢 Anúncios <b>verificados por ${esc(VERIF.por)}</b> em ${dia} às ${hora}. <button class="acao" id="btnReverif">Marcar por verificar</button>`;
+    document.getElementById("btnReverif").onclick=()=>{ VERIF={por:"",em:"",alvo:""}; escreverVerif(); renderVerif(); };
+  } else {
+    sem.title="Há anúncios novos por verificar — clique para marcar como verificado";
+    av.className=""; av.style.display="flex";
+    av.innerHTML=`⚠ <b>Há anúncios por verificar</b> (até ${dmy(alvo)}). Responsáveis: <b>SAFSM</b> (${PESSOAS.SAFSM}) e <b>JMF</b> (${PESSOAS.JMF}). <button class="acao primario" id="btnVerif">Marcar como verificado</button>`;
+    document.getElementById("btnVerif").onclick=marcarVerificado;
+  }
 }
 
 /* ---------- ir buscar os dados ao mesmo servidor (dados.json.gz) ---------- */
@@ -281,7 +338,7 @@ function initFiltros(){
   criarMulti("msCat","Categoria", CATS.map(c=>({v:c,txt:c})), F.cat);
   criarMulti("msEstado","Marcação", [
     {v:"analisar",txt:"🔍 A analisar"},{v:"concorrer",txt:"✅ A concorrer"},{v:"descartado",txt:"✖ Descartados"},
-    {v:"semmarca",txt:"Sem marcação"},{v:"comobs",txt:"Com observações"}], F.estado);
+    {v:"decl",txt:"📨 Declaração enviada"},{v:"semmarca",txt:"Sem marcação"},{v:"comobs",txt:"Com observações"}], F.estado);
   const tp=[...new Set(REGS.map(r=>r.proc).filter(Boolean))].sort();
   criarMulti("msProc","Tipo de procedimento", tp.map(t=>({v:t,txt:t})), F.proc);
   criarMulti("msLotes","Lotes", [{v:"Sim",txt:"Com lotes"},{v:"Não",txt:"Sem lotes"}], F.lotes);
@@ -307,6 +364,9 @@ function initEventos(){
   document.getElementById("vDe").onchange=e=>{F.de=e.target.value;render();};
   document.getElementById("vAte").onchange=e=>{F.ate=e.target.value;render();};
   document.getElementById("btnAtualizar").onclick=atualizarDaNuvem;
+  const eu=document.getElementById("euSel"); eu.value=EU;
+  eu.onchange=e=>{ EU=e.target.value; try{localStorage.setItem("adr_eu",EU);}catch(_){}; renderVerif(); };
+  document.getElementById("semaforo").onclick=()=>{ const verificado=VERIF.alvo&&VERIF.alvo===alvoAtual()&&VERIF.por; if(!verificado) marcarVerificado(); };
   document.getElementById("btnRecente").onclick=()=>{ const {max}=datasMinMax(); if(max) aplicarPeriodo(max,max); };
   document.getElementById("btnUltimos").onclick=()=>{ const {min,max}=datasMinMax(); if(!max) return; let n=parseInt(document.getElementById("fNdias").value)||7; let de=menosDias(max,n); if(min&&de<min)de=min; aplicarPeriodo(de,max); };
   document.getElementById("fNdias").onkeydown=e=>{ if(e.key==="Enter") document.getElementById("btnUltimos").click(); };
@@ -346,6 +406,7 @@ function filtrados(){
     if(F.estado.length){
       const marc=["analisar","concorrer","descartado"].filter(x=>F.estado.includes(x));
       const ok = (marc.length ? marc.includes(a.estado) : false)
+        || (F.estado.includes("decl") && a.decl)
         || (F.estado.includes("semmarca") && !a.estado)
         || (F.estado.includes("comobs") && a.obs && a.obs.trim());
       if(!ok) return false;
@@ -437,17 +498,18 @@ function linha(r){
     <td class="num">${eur(r.preco)}</td>
     <td class="nw">${dmy(r.dlim)}</td>
     <td class="nw">${r.pdf?`<a class="dr" href="${esc(r.pdf)}" target="_blank" rel="noopener">DR ↗</a>`:"—"}</td>
-    <td class="nw"><select class="estado ${a.estado?("v-"+a.estado):""}">
-      <option value="">—</option>
-      <option value="analisar" ${a.estado==="analisar"?"selected":""}>🔍 Analisar</option>
-      <option value="concorrer" ${a.estado==="concorrer"?"selected":""}>✅ Concorrer</option>
-      <option value="descartado" ${a.estado==="descartado"?"selected":""}>✖ Descartar</option>
-    </select></td>`;
+    <td class="nw"><div class="marc-cell">
+      <button class="mk mk-analisar ${a.estado==="analisar"?"on":""}" data-e="analisar" title="A analisar">🔍</button>
+      <button class="mk mk-concorrer ${a.estado==="concorrer"?"on":""}" data-e="concorrer" title="A concorrer">✅</button>
+      <button class="mk mk-descartado ${a.estado==="descartado"?"on":""}" data-e="descartado" title="Descartar">✖</button>
+      <button class="mk mk-decl ${a.decl?"on":""}" data-d="1" title="Declaração de participação enviada">📨</button>
+    </div></td>`;
   const chk=tr.querySelector('input[type=checkbox]');
   chk.onclick=e=>{ e.stopPropagation(); if(chk.checked)SEL.add(r.n); else SEL.delete(r.n); atualizaBotoesSel(); };
-  const sel=tr.querySelector("select.estado");
-  sel.onclick=e=>e.stopPropagation();
-  sel.onchange=e=>{ setEstado(r.n,e.target.value); render(); };
+  tr.querySelectorAll(".mk[data-e]").forEach(b=>b.onclick=e=>{
+    e.stopPropagation(); const est=b.dataset.e; setEstado(r.n, anot(r.n).estado===est?"":est); render();
+  });
+  tr.querySelector(".mk[data-d]").onclick=e=>{ e.stopPropagation(); setDecl(r.n, anot(r.n).decl?0:1); render(); };
   tr.onclick=()=>toggleDetalhe(tr,r);
   return tr;
 }
@@ -493,11 +555,11 @@ function linhasParaExportar(){
   return ordenar(arr);
 }
 function tabelaExport(arr){
-  const cab=["Data","Categoria","Entidade","NIPC","Objeto","Procedimento","Preço base (€)","Prazo (dias)","Data limite","CPV","Plataforma","Marcação","Observações","Link DR"];
+  const cab=["Data","Categoria","Entidade","NIPC","Objeto","Procedimento","Preço base (€)","Prazo (dias)","Data limite","CPV","Plataforma","Marcação","Declaração enviada","Observações","Link DR"];
   const est={analisar:"A analisar",concorrer:"A concorrer",descartado:"Descartado","":""};
   const linhas=arr.map(r=>{ const a=anot(r.n); return [
     dmy(r.data), r.cat, r.ent, r.nif||"", r.obj||"", r.proc||"", (r.preco!=null?r.preco:""),
-    r.prazo||"", dmy(r.dlim), (r.cpv||[]).join("; "), r.plat||"", est[a.estado]||"", a.obs||"", r.pdf||""
+    r.prazo||"", dmy(r.dlim), (r.cpv||[]).join("; "), r.plat||"", est[a.estado]||"", (a.decl?"Sim":""), a.obs||"", r.pdf||""
   ];});
   return {cab,linhas};
 }
@@ -540,6 +602,7 @@ function mostrarStatus(){
   document.getElementById("status").innerHTML=
     `${REGS.length} anúncios · ${dmy(META.de)}–${dmy(maxd)} · fonte Portal BASE/IMPIC + Diário da República` +
     (META.gerado?` · atualizado ${dmy(META.gerado)}`:``);
+  renderVerif();
 }
 
 /* ---------- atualizar (botão): volta a ler o ficheiro do servidor ---------- */
@@ -568,9 +631,10 @@ async function atualizarDaNuvem(){
   initFiltros(); definirDatasDefeito(); initEventos(); mostrarStatus(); render();
   // puxar as marcações da nuvem (para aparecerem as feitas noutro computador) e semear as locais
   try{ if(await puxarMarc()){ render(); } agendarPush(); }catch(e){}
-  // recarrega em silêncio a cada 30 min (dados novos) e puxa marcações a cada 60s (sincronizar entre PCs)
+  try{ await lerVerif(); renderVerif(); }catch(e){}
+  // recarrega em silêncio a cada 30 min (dados novos) e puxa marcações + verificação a cada 60s (sincronizar entre PCs)
   setInterval(async()=>{ try{ const a=REGS.length; await carregarDados(); if(REGS.length!==a){ initFiltros(); mostrarStatus(); render(); } }catch(e){} }, 1800000);
-  setInterval(async()=>{ try{ const antes=JSON.stringify(MARC); if(await puxarMarc() && JSON.stringify(MARC)!==antes){ render(); } }catch(e){} }, 60000);
+  setInterval(async()=>{ try{ const antes=JSON.stringify(MARC); if(await puxarMarc() && JSON.stringify(MARC)!==antes){ render(); } const av=JSON.stringify(VERIF); await lerVerif(); if(JSON.stringify(VERIF)!==av) renderVerif(); }catch(e){} }, 60000);
 })();
 </script>
 </body>
