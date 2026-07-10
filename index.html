@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Anúncios Concursos DR</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+<style>
+  :root{--bg:#f6f7f9;--card:#fff;--ink:#1a2233;--muted:#65708a;--line:#e4e7ee;
+    --accent:#0f4c81;--accent-soft:#e8f0f8;--ok:#1a7f4e;--warn:#b3540a;
+    --obras:#8a5a00;--obras-bg:#fff7e0;--serv:#0f4c81;--serv-bg:#e8f0f8;
+    --forn:#1a7f4e;--forn-bg:#e5f4ec;--conc:#7a3fa0;--conc-bg:#f3e9fa;--outros:#556;--outros-bg:#eef0f4}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI",system-ui,-apple-system,Arial,sans-serif;background:var(--bg);color:var(--ink);font-size:13.5px}
+  header{background:var(--accent);color:#fff;padding:11px 22px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  header h1{margin:0;font-size:17px;font-weight:600}
+  header .resumo{font-size:13px;opacity:.92}
+  #info{margin-left:auto;font-size:12px;padding:4px 12px;border-radius:20px;background:rgba(255,255,255,.15)}
+  main{max-width:1440px;margin:0 auto;padding:14px 22px 60px}
+
+  .painel{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-bottom:10px;
+    display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap}
+  .campo{display:flex;flex-direction:column;gap:3px}
+  .campo>label{font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
+  select,input[type=date],input[type=number],input[type=search]{
+    border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:13px;background:#fff;color:var(--ink)}
+  input[type=search]{min-width:280px}
+  select:focus,input:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
+  button.acao{border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;white-space:nowrap}
+  button.acao:hover{border-color:var(--accent);color:var(--accent)}
+  button.acao.primario{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.acao.primario:hover{opacity:.92;color:#fff}
+  .dias{display:flex;gap:6px;flex-wrap:wrap;align-items:center;max-width:520px}
+  .dia-btn{border:1px solid var(--line);background:#fff;border-radius:20px;padding:5px 12px;cursor:pointer;font-size:12.5px}
+  .dia-btn.activo{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .cats{display:flex;gap:6px;flex-wrap:wrap}
+  .cat-btn{border:1px solid var(--line);background:#fff;border-radius:20px;padding:6px 13px;cursor:pointer;font-size:13px}
+  .cat-btn.activo{border-width:2px;font-weight:600}
+  .cat-btn[data-c="Obras"].activo{border-color:var(--obras);color:var(--obras);background:var(--obras-bg)}
+  .cat-btn[data-c="Serviços"].activo{border-color:var(--serv);color:var(--serv);background:var(--serv-bg)}
+  .cat-btn[data-c="Fornecimento de bens"].activo{border-color:var(--forn);color:var(--forn);background:var(--forn-bg)}
+  .cat-btn[data-c="Concessões"].activo{border-color:var(--conc);color:var(--conc);background:var(--conc-bg)}
+  .cat-btn[data-c="Outros"].activo{border-color:var(--outros);color:var(--outros);background:var(--outros-bg)}
+  .cat-btn[data-c=""].activo{border-color:var(--ink);background:#eef0f4}
+
+  #status{font-size:12.5px;color:var(--muted);margin:2px 2px 8px}
+  .ajuda{font-size:12.5px;color:var(--muted);max-width:420px;line-height:1.5}
+
+  .grupo{margin-top:14px}
+  .grupo-cab{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:9px;font-weight:600;font-size:14px;cursor:pointer;user-select:none}
+  .grupo.aberto .grupo-cab{border-radius:9px 9px 0 0}
+  .grupo-cab .seta{font-size:11px;width:14px}
+  .grupo-cab .sub{font-weight:400;font-size:12.5px;opacity:.85}
+  .grupo-cab input[type=checkbox]{width:15px;height:15px;cursor:pointer}
+  .grupo-cab.Obras{background:var(--obras-bg);color:var(--obras)}
+  .grupo-cab.Servicos{background:var(--serv-bg);color:var(--serv)}
+  .grupo-cab.Fornecimento{background:var(--forn-bg);color:var(--forn)}
+  .grupo-cab.Concessoes{background:var(--conc-bg);color:var(--conc)}
+  .grupo-cab.Outros{background:var(--outros-bg);color:var(--outros)}
+  .grupo .tabela-wrap{display:none}
+  .grupo.aberto .tabela-wrap{display:block}
+  .tabela-wrap{background:#fff;border:1px solid var(--line);border-radius:0 0 9px 9px;overflow:auto}
+  table{border-collapse:collapse;width:100%;min-width:1120px}
+  th{background:#fbfcfe;border-bottom:2px solid var(--line);text-align:left;padding:8px 9px;font-size:11.5px;
+    text-transform:uppercase;letter-spacing:.03em;color:var(--muted);white-space:nowrap;cursor:pointer;user-select:none}
+  th.num{text-align:right}
+  th:hover{color:var(--accent)}
+  td{border-bottom:1px solid var(--line);padding:8px 9px;vertical-align:top}
+  td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:600}
+  td.nw{white-space:nowrap}
+  tr.linha{cursor:pointer}
+  tr.linha:hover td{background:#f6f9fd}
+  tr.linha.e-analisar td{background:#eaf3fc}
+  tr.linha.e-concorrer td{background:#e7f6ee}
+  tr.linha.e-descartado td{background:#f3f4f7;opacity:.62}
+  .ent{font-weight:600}
+  .obj{color:var(--muted);font-size:12px;margin-top:2px;max-width:440px}
+  a.dr{color:var(--accent);text-decoration:none;font-weight:600;white-space:nowrap}
+  a.dr:hover{text-decoration:underline}
+  .pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11.5px;background:#eef1f6;white-space:nowrap}
+  .pill.urg{background:#fdefe3;color:var(--warn)}
+  select.estado{padding:4px 6px;font-size:12px;border-radius:6px;min-width:112px}
+  select.estado.v-analisar{border-color:#4a90d9;color:#1c5fa8;background:#eaf3fc}
+  select.estado.v-concorrer{border-color:#3aa06a;color:#187244;background:#e7f6ee}
+  select.estado.v-descartado{border-color:#aab;color:#667;background:#f0f1f4}
+  td input[type=checkbox]{width:15px;height:15px;cursor:pointer}
+  tr.detalhe td{background:#fbfcfe;padding:14px 20px}
+  .det-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(255px,1fr));gap:10px 26px;font-size:13px}
+  .det-grid div b{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:2px}
+  .det-grid .full{grid-column:1/-1}
+  .obs-caixa{grid-column:1/-1}
+  .obs-caixa textarea{width:100%;min-height:64px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;
+    font-family:inherit;font-size:13px;resize:vertical;background:#fffdf3}
+  .obs-caixa .estado-obs{font-size:11.5px;color:var(--muted);margin-top:3px}
+  #vazio{padding:40px;text-align:center;color:var(--muted);background:#fff;border:1px solid var(--line);border-radius:10px;margin-top:14px}
+  .nota{margin-top:16px;font-size:12.5px;color:var(--muted);line-height:1.55}
+</style>
+</head>
+<body>
+<header>
+  <h1>Anúncios Concursos DR</h1>
+  <span class="resumo" id="resumo"></span>
+  <span id="info"></span>
+</header>
+<main>
+  <div class="painel">
+    <div class="campo">
+      <label>Ver — de</label>
+      <input type="date" id="vDe">
+    </div>
+    <div class="campo">
+      <label>até</label>
+      <input type="date" id="vAte">
+    </div>
+    <div class="campo" style="flex:1;min-width:300px">
+      <label>Pesquisa em tudo (vários termos com ; )</label>
+      <input type="search" id="pesquisa" placeholder="ex.: escola; ambulância; 45233141">
+    </div>
+    <button class="acao primario" id="btnAtualizar" title="Vai buscar os anúncios mais recentes à nuvem">↻ Atualizar</button>
+    <button class="acao" id="btnToggleTodos">Minimizar tudo</button>
+    <button class="acao" id="btnExcel">Excel (0 sel.)</button>
+    <button class="acao" id="btnPdf">PDF (0 sel.)</button>
+  </div>
+
+  <div class="painel">
+    <div class="campo">
+      <label>Categoria</label>
+      <div class="cats" id="cats"></div>
+    </div>
+    <div class="campo"><label>Marcação</label>
+      <select id="fEstado"><option value="">Todas</option><option value="analisar">🔍 A analisar</option>
+      <option value="concorrer">✅ A concorrer</option><option value="descartado">✖ Descartados</option>
+      <option value="semmarca">Sem marcação</option><option value="comobs">Com observações</option></select></div>
+    <div class="campo"><label>Tipo de procedimento</label><select id="fTipoProc"></select></div>
+    <div class="campo"><label>Lotes</label><select id="fLotes"><option value="">Todos</option><option>Sim</option><option>Não</option></select></div>
+    <div class="campo"><label>Crit. ambiental</label><select id="fAmb"><option value="">Todos</option><option>Sim</option><option>Não</option></select></div>
+    <div class="campo"><label>Valor mín. €</label><input type="number" id="fVmin" min="0" step="1000" style="width:105px"></div>
+    <div class="campo"><label>Valor máx. €</label><input type="number" id="fVmax" min="0" step="1000" style="width:105px"></div>
+    <button class="acao" id="btnLimpar">Limpar filtros</button>
+  </div>
+
+  <div id="status"></div>
+
+  <div id="conteudo"></div>
+  <div id="vazio" style="display:none">Sem resultados para o período/filtros/pesquisa actuais.</div>
+
+  <p class="nota">
+    <b>Como usar:</b> clique no cabeçalho de um grupo para o minimizar/abrir; clique numa linha para ver toda a informação do anúncio e escrever observações; use o selector de cada linha para marcar «A analisar», «A concorrer» ou «Descartado». As marcações e observações ficam <b>guardadas neste computador</b> automaticamente. Para ver datas anteriores use os campos «Ver de/até». A página <b>atualiza-se sozinha todos os dias</b> — pode carregar em «↻ Atualizar» a qualquer momento para ver as novidades.<br>
+    <b>Fonte:</b> dados oficiais do Portal BASE / IMPIC (dados.gov.pt). O link «DR» de cada anúncio abre o PDF oficial no Diário da República.
+  </p>
+</main>
+
+<script>
+let META={gerado:"",de:"",ate:"",janela:120,n:0};
+const CATS=["Obras","Serviços","Fornecimento de bens","Concessões","Outros"];
+const CLS={"Obras":"Obras","Serviços":"Servicos","Fornecimento de bens":"Fornecimento","Concessões":"Concessoes","Outros":"Outros"};
+let REGS=[];      // todos os anúncios (vindos do ficheiro dados.json.gz no mesmo servidor)
+
+/* ---------- utilitários ---------- */
+const eur=n=> (n==null||isNaN(n))?"—":new Intl.NumberFormat("pt-PT",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(n);
+const dmy=s=>{ if(!s)return "—"; const p=s.split("-"); return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:s; };
+const esc=s=> (s==null?"":String(s)).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function slug(n){ return "a"+String(n).replace(/[^a-zA-Z0-9]/g,"_"); }
+
+/* ---------- marcações (guardadas localmente) ---------- */
+let MARC={};
+try{ MARC=JSON.parse(localStorage.getItem("adr_marcacoes")||"{}"); }catch(e){ MARC={}; }
+function anot(n){ return MARC[n]||{estado:"",obs:""}; }
+function guardarMarc(){ try{ localStorage.setItem("adr_marcacoes",JSON.stringify(MARC)); }catch(e){} }
+function setEstado(n,v){ const a=anot(n); a.estado=v; MARC[n]=a; guardarMarc(); }
+function setObs(n,v){ const a=anot(n); a.obs=v; MARC[n]=a; guardarMarc(); }
+
+/* ---------- ir buscar os dados ao mesmo servidor (dados.json.gz) ---------- */
+async function carregarDados(){
+  // tenta o ficheiro comprimido; se falhar, tenta o .json simples
+  let obj=null;
+  try{
+    const r=await fetch("dados.json.gz?t="+Date.now(),{cache:"no-store"});
+    if(r.ok){
+      const buf=new Uint8Array(await r.arrayBuffer());
+      let txt;
+      if("DecompressionStream" in window){
+        txt=await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"))).text();
+      }else{ txt=new TextDecoder().decode(buf); }
+      obj=JSON.parse(txt);
+    }
+  }catch(e){}
+  if(!obj){
+    const r=await fetch("dados.json?t="+Date.now(),{cache:"no-store"});
+    obj=await r.json();
+  }
+  REGS=obj.regs||[];
+  META={gerado:obj.gerado||"",de:obj.de||"",ate:obj.ate||"",janela:obj.janela||120,n:REGS.length};
+}
+
+/* ---------- estado dos filtros/vista ---------- */
+const F={cat:"",estado:"",proc:"",lotes:"",amb:"",vmin:null,vmax:null,de:null,ate:null,pesq:""};
+let ordCampo="data", ordDir=-1;
+const abertos={}, minimizados={};
+
+/* ---------- construir filtros dinâmicos ---------- */
+function initFiltros(){
+  // categorias
+  const cbox=document.getElementById("cats");
+  const mk=(c,txt)=>`<div class="cat-btn ${c===""?"activo":""}" data-c="${c}">${txt}</div>`;
+  cbox.innerHTML=mk("","Todas")+CATS.map(c=>mk(c,c)).join("");
+  cbox.querySelectorAll(".cat-btn").forEach(b=>b.onclick=()=>{
+    F.cat=b.dataset.c; cbox.querySelectorAll(".cat-btn").forEach(x=>x.classList.remove("activo"));
+    b.classList.add("activo"); render();
+  });
+  // tipos de procedimento
+  const tp=[...new Set(REGS.map(r=>r.proc).filter(Boolean))].sort();
+  document.getElementById("fTipoProc").innerHTML='<option value="">Todos</option>'+tp.map(t=>`<option>${esc(t)}</option>`).join("");
+}
+// datas por defeito: intervalo todo dos dados carregados
+function definirDatasDefeito(){
+  const dias=[...new Set(REGS.map(r=>r.data))].sort();
+  if(!dias.length) return;
+  const de=document.getElementById("vDe"), ate=document.getElementById("vAte");
+  if(!de.value){ de.value=dias[0]; F.de=dias[0]; }
+  // manter o "até" sempre no dia mais recente disponível
+  ate.value=dias[dias.length-1]; F.ate=dias[dias.length-1];
+}
+
+/* ---------- ligações ---------- */
+function initEventos(){
+  document.getElementById("vDe").onchange=e=>{F.de=e.target.value;render();};
+  document.getElementById("vAte").onchange=e=>{F.ate=e.target.value;render();};
+  document.getElementById("btnAtualizar").onclick=atualizarDaNuvem;
+  document.getElementById("pesquisa").oninput=e=>{F.pesq=e.target.value.trim();render();};
+  document.getElementById("fEstado").onchange=e=>{F.estado=e.target.value;render();};
+  document.getElementById("fTipoProc").onchange=e=>{F.proc=e.target.value;render();};
+  document.getElementById("fLotes").onchange=e=>{F.lotes=e.target.value;render();};
+  document.getElementById("fAmb").onchange=e=>{F.amb=e.target.value;render();};
+  document.getElementById("fVmin").oninput=e=>{F.vmin=e.target.value?+e.target.value:null;render();};
+  document.getElementById("fVmax").oninput=e=>{F.vmax=e.target.value?+e.target.value:null;render();};
+  document.getElementById("btnLimpar").onclick=()=>{
+    Object.assign(F,{cat:"",estado:"",proc:"",lotes:"",amb:"",vmin:null,vmax:null});
+    ["fEstado","fTipoProc","fLotes","fAmb","fVmin","fVmax"].forEach(id=>document.getElementById(id).value="");
+    document.querySelectorAll("#cats .cat-btn").forEach(x=>x.classList.remove("activo"));
+    document.querySelector('#cats .cat-btn[data-c=""]').classList.add("activo");
+    render();
+  };
+  document.getElementById("btnToggleTodos").onclick=()=>{
+    const algumAberto=CATS.some(c=>!minimizados[c] && grupoTem(c));
+    CATS.forEach(c=>minimizados[c]=algumAberto);
+    document.getElementById("btnToggleTodos").textContent=algumAberto?"Abrir tudo":"Minimizar tudo";
+    render();
+  };
+  document.getElementById("btnExcel").onclick=exportarExcel;
+  document.getElementById("btnPdf").onclick=exportarPdf;
+}
+function grupoTem(c){ return filtrados().some(r=>r.cat===c); }
+
+/* ---------- filtragem ---------- */
+function filtrados(){
+  const termos=F.pesq?F.pesq.toLowerCase().split(";").map(t=>t.trim()).filter(Boolean):[];
+  return REGS.filter(r=>{
+    if(F.de && r.data<F.de) return false;
+    if(F.ate && r.data>F.ate) return false;
+    if(F.cat && r.cat!==F.cat) return false;
+    if(F.proc && r.proc!==F.proc) return false;
+    if(F.lotes){ const tem=Array.isArray(r.lotes)&&r.lotes.length>0; if(F.lotes==="Sim"&&!tem)return false; if(F.lotes==="Não"&&tem)return false; }
+    if(F.amb && (r.amb||"")!==F.amb) return false;
+    if(F.vmin!=null && !(r.preco>=F.vmin)) return false;
+    if(F.vmax!=null && !(r.preco<=F.vmax)) return false;
+    const a=anot(r.n);
+    if(F.estado==="semmarca" && a.estado) return false;
+    if(F.estado==="comobs" && !(a.obs&&a.obs.trim())) return false;
+    if(["analisar","concorrer","descartado"].includes(F.estado) && a.estado!==F.estado) return false;
+    if(termos.length){
+      const blob=[r.n,r.ent,r.obj,r.nif,r.proc,(r.cpv||[]).join(" "),(r.lotes||[]).join(" "),a.obs].join(" ").toLowerCase();
+      if(!termos.every(t=>blob.includes(t))) return false;
+    }
+    return true;
+  });
+}
+function ordenar(arr){
+  const s=[...arr].sort((a,b)=>{
+    let x=a[ordCampo], y=b[ordCampo];
+    if(ordCampo==="preco"){ x=x||0; y=y||0; return (x-y)*ordDir; }
+    x=(x==null?"":String(x)).toLowerCase(); y=(y==null?"":String(y)).toLowerCase();
+    return x<y?-1*ordDir:x>y?1*ordDir:0;
+  });
+  return s;
+}
+
+/* ---------- selecção p/ exportar ---------- */
+const SEL=new Set();
+function atualizaBotoesSel(){
+  const n=SEL.size;
+  document.getElementById("btnExcel").textContent=`Excel (${n} sel.)`;
+  document.getElementById("btnPdf").textContent=`PDF (${n} sel.)`;
+}
+
+/* ---------- render ---------- */
+function render(){
+  const arr=filtrados();
+  const cont=document.getElementById("conteudo");
+  const totalVal=arr.reduce((s,r)=>s+(r.preco||0),0);
+  document.getElementById("resumo").textContent=`${arr.length} anúncios · ${eur(totalVal)}`;
+  cont.innerHTML="";
+  let algum=false;
+  CATS.forEach(c=>{
+    const doGrupo=ordenar(arr.filter(r=>r.cat===c));
+    if(!doGrupo.length) return;
+    algum=true;
+    const soma=doGrupo.reduce((s,r)=>s+(r.preco||0),0);
+    const aberto=!minimizados[c];
+    const div=document.createElement("div");
+    div.className="grupo"+(aberto?" aberto":"");
+    div.innerHTML=`
+      <div class="grupo-cab ${CLS[c]}">
+        <span class="seta">${aberto?"▾":"▸"}</span>
+        <span>${c}</span>
+        <span class="sub">· ${doGrupo.length} anúncios · ${eur(soma)}</span>
+      </div>
+      <div class="tabela-wrap">
+        <table>
+          <thead><tr>
+            <th style="width:26px"></th>
+            <th data-o="data" class="nw">Data</th>
+            <th data-o="ent">Entidade / Objeto</th>
+            <th data-o="proc" class="nw">Procedimento</th>
+            <th data-o="preco" class="num">Preço base</th>
+            <th data-o="dlim" class="nw">Data limite</th>
+            <th class="nw">DR</th>
+            <th class="nw">Marcação</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>`;
+    div.querySelector(".grupo-cab").onclick=()=>{ minimizados[c]=aberto; render(); };
+    div.querySelectorAll("th[data-o]").forEach(th=>th.onclick=()=>{
+      const campo=th.dataset.o; if(ordCampo===campo) ordDir*=-1; else {ordCampo=campo; ordDir=1;} render();
+    });
+    const tb=div.querySelector("tbody");
+    doGrupo.forEach(r=>tb.appendChild(linha(r)));
+    cont.appendChild(div);
+  });
+  document.getElementById("vazio").style.display=algum?"none":"block";
+  atualizaBotoesSel();
+}
+
+function linha(r){
+  const a=anot(r.n);
+  const tr=document.createElement("tr");
+  tr.className="linha"+(a.estado?(" e-"+a.estado):"");
+  const urg=r.urg?` <span class="pill urg">urgente</span>`:"";
+  tr.innerHTML=`
+    <td><input type="checkbox" ${SEL.has(r.n)?"checked":""}></td>
+    <td class="nw">${dmy(r.data)}</td>
+    <td><div class="ent">${esc(r.ent)}${urg}</div><div class="obj">${esc(r.obj||"")}</div></td>
+    <td class="nw">${esc(r.proc||"—")}</td>
+    <td class="num">${eur(r.preco)}</td>
+    <td class="nw">${dmy(r.dlim)}</td>
+    <td class="nw">${r.pdf?`<a class="dr" href="${esc(r.pdf)}" target="_blank" rel="noopener">DR ↗</a>`:"—"}</td>
+    <td class="nw"><select class="estado ${a.estado?("v-"+a.estado):""}">
+      <option value="">—</option>
+      <option value="analisar" ${a.estado==="analisar"?"selected":""}>🔍 Analisar</option>
+      <option value="concorrer" ${a.estado==="concorrer"?"selected":""}>✅ Concorrer</option>
+      <option value="descartado" ${a.estado==="descartado"?"selected":""}>✖ Descartar</option>
+    </select></td>`;
+  const chk=tr.querySelector('input[type=checkbox]');
+  chk.onclick=e=>{ e.stopPropagation(); if(chk.checked)SEL.add(r.n); else SEL.delete(r.n); atualizaBotoesSel(); };
+  const sel=tr.querySelector("select.estado");
+  sel.onclick=e=>e.stopPropagation();
+  sel.onchange=e=>{ setEstado(r.n,e.target.value); render(); };
+  tr.onclick=()=>toggleDetalhe(tr,r);
+  return tr;
+}
+
+function toggleDetalhe(tr,r){
+  if(tr.nextSibling && tr.nextSibling.classList && tr.nextSibling.classList.contains("detalhe")){ tr.nextSibling.remove(); return; }
+  const a=anot(r.n);
+  const d=document.createElement("tr");
+  d.className="detalhe";
+  const cpv=(r.cpv||[]).join("<br>")||"—";
+  const lotes=(Array.isArray(r.lotes)&&r.lotes.length)?r.lotes.join("<br>"):"—";
+  d.innerHTML=`<td colspan="8"><div class="det-grid">
+    <div><b>Nº anúncio</b>${esc(r.n)}</div>
+    <div><b>Data de publicação</b>${dmy(r.data)}</div>
+    <div><b>Categoria</b>${esc(r.cat)}</div>
+    <div><b>Tipo de procedimento</b>${esc(r.proc||"—")}</div>
+    <div><b>Preço base</b>${eur(r.preco)}</div>
+    <div><b>Prazo p/ propostas</b>${r.prazo?esc(r.prazo)+" dias":"—"}</div>
+    <div><b>Data limite de propostas</b>${dmy(r.dlim)}</div>
+    <div><b>Critério ambiental</b>${esc(r.amb||"—")}</div>
+    <div><b>NIPC entidade</b>${esc(r.nif||"—")}</div>
+    <div class="full"><b>Entidade</b>${esc(r.ent)}</div>
+    <div class="full"><b>Objeto</b>${esc(r.obj||"—")}</div>
+    <div class="full"><b>CPV</b>${cpv}</div>
+    <div class="full"><b>Lotes</b>${lotes}</div>
+    <div class="full"><b>Plataforma / peças do procedimento</b>${r.plat?`<a class="dr" href="${esc(r.plat)}" target="_blank" rel="noopener">${esc(r.plat)}</a>`:"—"}</div>
+    <div class="full"><b>Anúncio no Diário da República</b>${r.pdf?`<a class="dr" href="${esc(r.pdf)}" target="_blank" rel="noopener">Abrir PDF oficial ↗</a>`:"—"}</div>
+    <div class="obs-caixa"><b>Observações (guardadas neste computador)</b>
+      <textarea placeholder="notas sobre este concurso…">${esc(a.obs||"")}</textarea>
+      <div class="estado-obs"></div>
+    </div>
+  </div></td>`;
+  const ta=d.querySelector("textarea");
+  const est=d.querySelector(".estado-obs");
+  ta.oninput=()=>{ setObs(r.n,ta.value); est.textContent="guardado ✓"; setTimeout(()=>est.textContent="",1200); };
+  tr.after(d);
+}
+
+/* ---------- exportação ---------- */
+function linhasParaExportar(){
+  let arr=filtrados();
+  if(SEL.size) arr=arr.filter(r=>SEL.has(r.n));
+  return ordenar(arr);
+}
+function tabelaExport(arr){
+  const cab=["Data","Categoria","Entidade","NIPC","Objeto","Procedimento","Preço base (€)","Prazo (dias)","Data limite","CPV","Plataforma","Marcação","Observações","Link DR"];
+  const est={analisar:"A analisar",concorrer:"A concorrer",descartado:"Descartado","":""};
+  const linhas=arr.map(r=>{ const a=anot(r.n); return [
+    dmy(r.data), r.cat, r.ent, r.nif||"", r.obj||"", r.proc||"", (r.preco!=null?r.preco:""),
+    r.prazo||"", dmy(r.dlim), (r.cpv||[]).join("; "), r.plat||"", est[a.estado]||"", a.obs||"", r.pdf||""
+  ];});
+  return {cab,linhas};
+}
+function exportarExcel(){
+  const arr=linhasParaExportar();
+  if(!arr.length){ alert("Sem anúncios para exportar."); return; }
+  const {cab,linhas}=tabelaExport(arr);
+  const ws=XLSX.utils.aoa_to_sheet([cab,...linhas]);
+  ws["!cols"]=cab.map((c,i)=>({wch:[11,16,34,12,44,20,14,10,12,26,30,13,30,40][i]||16}));
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,"Anúncios");
+  XLSX.writeFile(wb,`anuncios-dr-${(F.de||"")}_a_${(F.ate||"")}.xlsx`);
+}
+function exportarPdf(){
+  const arr=linhasParaExportar();
+  if(!arr.length){ alert("Sem anúncios para exportar."); return; }
+  const {jsPDF}=window.jspdf;
+  const doc=new jsPDF({orientation:"landscape",unit:"pt",format:"a4"});
+  const est={analisar:"Analisar",concorrer:"Concorrer",descartado:"Descartado","":""};
+  const body=arr.map(r=>{ const a=anot(r.n); return [
+    dmy(r.data), r.cat, r.ent, (r.obj||"").slice(0,90), r.proc||"", eur(r.preco), dmy(r.dlim), est[a.estado]||""
+  ];});
+  doc.setFontSize(13); doc.text("Anúncios Concursos DR",40,34);
+  doc.setFontSize(9); doc.setTextColor(120);
+  doc.text(`Período ${dmy(F.de)} a ${dmy(F.ate)} · ${arr.length} anúncios · fonte: Portal BASE/IMPIC`,40,50);
+  doc.autoTable({
+    startY:60, head:[["Data","Categoria","Entidade","Objeto","Procedimento","Preço base","Data limite","Marcação"]],
+    body, styles:{fontSize:7.5,cellPadding:3,overflow:"linebreak"},
+    headStyles:{fillColor:[15,76,129]},
+    columnStyles:{2:{cellWidth:120},3:{cellWidth:200},5:{halign:"right"}}
+  });
+  doc.save(`anuncios-dr-${(F.de||"")}_a_${(F.ate||"")}.pdf`);
+}
+
+/* ---------- estado / status ---------- */
+function mostrarStatus(){
+  const dias=[...new Set(REGS.map(r=>r.data))];
+  const maxd=dias.length?dias.sort()[dias.length-1]:META.ate;
+  document.getElementById("info").innerHTML=`Anúncios até <b>${dmy(maxd)}</b>`;
+  document.getElementById("status").innerHTML=
+    `${REGS.length} anúncios · ${dmy(META.de)}–${dmy(maxd)} · fonte Portal BASE/IMPIC + Diário da República` +
+    (META.gerado?` · atualizado ${dmy(META.gerado)}`:``);
+}
+
+/* ---------- atualizar (botão): volta a ler o ficheiro do servidor ---------- */
+let aAtualizar=false;
+async function atualizarDaNuvem(){
+  if(aAtualizar) return; aAtualizar=true;
+  const btn=document.getElementById("btnAtualizar");
+  const txt=btn.textContent; btn.textContent="↻ a atualizar…"; btn.disabled=true;
+  const antes=REGS.length;
+  try{
+    await carregarDados();
+    initFiltros(); definirDatasDefeito(); mostrarStatus(); render();
+    const dif=REGS.length-antes;
+    btn.textContent = dif>0 ? `↻ +${dif} novos` : "↻ Atualizado";
+  }catch(e){ btn.textContent="↻ Falhou"; }
+  setTimeout(()=>{ btn.textContent=txt; btn.disabled=false; aAtualizar=false; },2800);
+}
+
+/* ---------- arranque ---------- */
+(async function(){
+  try{
+    await carregarDados();
+  }catch(e){
+    document.getElementById("status").innerHTML=`<span style="color:#b02a2a">Erro a carregar os dados: ${esc(e.message)}. Tente recarregar a página.</span>`;
+  }
+  initFiltros(); definirDatasDefeito(); initEventos(); mostrarStatus(); render();
+  // recarrega em silêncio a cada 30 min, para apanhar a atualização diária sem fechar a página
+  setInterval(async()=>{ try{ const a=REGS.length; await carregarDados(); if(REGS.length!==a){ initFiltros(); definirDatasDefeito(); mostrarStatus(); render(); } }catch(e){} }, 1800000);
+})();
+</script>
+</body>
+</html>
