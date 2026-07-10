@@ -25,8 +25,10 @@ def iso(s):
     try: return datetime.datetime.strptime(s, "%d/%m/%Y").strftime("%Y-%m-%d")
     except Exception: return None
 
-def iso2(s):  # dd-mm-aaaa -> aaaa-mm-dd
-    m=re.search(r"(\d{2})-(\d{2})-(\d{4})", s or "")
+def iso2(s):  # aceita aaaa-mm-dd (passa igual) OU dd-mm-aaaa (converte)
+    s=(s or "").strip()
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", s): return s
+    m=re.search(r"(\d{2})-(\d{2})-(\d{4})", s)
     return f"{m[3]}-{m[2]}-{m[1]}" if m else ""
 
 def categoria(tcs):
