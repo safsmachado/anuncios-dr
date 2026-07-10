@@ -44,6 +44,20 @@
   .cat-btn[data-c="Concessões"].activo{border-color:var(--conc);color:var(--conc);background:var(--conc-bg)}
   .cat-btn[data-c="Outros"].activo{border-color:var(--outros);color:var(--outros);background:var(--outros-bg)}
   .cat-btn[data-c=""].activo{border-color:var(--ink);background:#eef0f4}
+  /* menu de escolha múltipla */
+  .ms{position:relative;display:inline-block}
+  .ms-btn{border:1px solid var(--line);background:#fff;border-radius:8px;padding:7px 30px 7px 12px;font-size:13px;cursor:pointer;min-width:150px;text-align:left;position:relative;white-space:nowrap}
+  .ms-btn:hover{border-color:var(--accent)}
+  .ms-btn.tem{border-color:var(--accent);color:var(--accent);font-weight:600;background:var(--accent-soft)}
+  .ms-btn::after{content:"▾";position:absolute;right:10px;top:7px;color:var(--muted)}
+  .ms-panel{display:none;position:absolute;z-index:50;top:calc(100% + 4px);left:0;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(20,30,50,.14);padding:6px;min-width:230px;max-height:320px;overflow:auto}
+  .ms.aberto .ms-panel{display:block}
+  .ms-opt{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:7px;cursor:pointer;font-size:13px}
+  .ms-opt:hover{background:#f2f6fb}
+  .ms-opt input{width:15px;height:15px;cursor:pointer}
+  .ms-acts{display:flex;justify-content:space-between;padding:4px 6px 6px;border-top:1px solid var(--line);margin-top:4px}
+  .ms-acts button{border:none;background:none;color:var(--accent);cursor:pointer;font-size:12.5px;padding:3px 6px}
+  .ms-acts button:hover{text-decoration:underline}
 
   #status{font-size:12.5px;color:var(--muted);margin:2px 2px 8px}
   .ajuda{font-size:12.5px;color:var(--muted);max-width:420px;line-height:1.5}
@@ -125,17 +139,11 @@
   </div>
 
   <div class="painel">
-    <div class="campo">
-      <label>Categoria</label>
-      <div class="cats" id="cats"></div>
-    </div>
-    <div class="campo"><label>Marcação</label>
-      <select id="fEstado"><option value="">Todas</option><option value="analisar">🔍 A analisar</option>
-      <option value="concorrer">✅ A concorrer</option><option value="descartado">✖ Descartados</option>
-      <option value="semmarca">Sem marcação</option><option value="comobs">Com observações</option></select></div>
-    <div class="campo"><label>Tipo de procedimento</label><select id="fTipoProc"></select></div>
-    <div class="campo"><label>Lotes</label><select id="fLotes"><option value="">Todos</option><option>Sim</option><option>Não</option></select></div>
-    <div class="campo"><label>Crit. ambiental</label><select id="fAmb"><option value="">Todos</option><option>Sim</option><option>Não</option></select></div>
+    <div class="campo"><label>Categoria</label><div class="ms" id="msCat"></div></div>
+    <div class="campo"><label>Marcação</label><div class="ms" id="msEstado"></div></div>
+    <div class="campo"><label>Tipo de procedimento</label><div class="ms" id="msProc"></div></div>
+    <div class="campo"><label>Lotes</label><div class="ms" id="msLotes"></div></div>
+    <div class="campo"><label>Crit. ambiental</label><div class="ms" id="msAmb"></div></div>
     <div class="campo"><label>Valor mín. €</label><input type="number" id="fVmin" min="0" step="1000" style="width:105px"></div>
     <div class="campo"><label>Valor máx. €</label><input type="number" id="fVmax" min="0" step="1000" style="width:105px"></div>
     <button class="acao" id="btnLimpar">Limpar filtros</button>
@@ -196,24 +204,51 @@ async function carregarDados(){
 }
 
 /* ---------- estado dos filtros/vista ---------- */
-const F={cat:"",estado:"",proc:"",lotes:"",amb:"",vmin:null,vmax:null,de:null,ate:null,pesq:""};
+const F={cat:[],estado:[],proc:[],lotes:[],amb:[],vmin:null,vmax:null,de:null,ate:null,pesq:""};
 let ordCampo="data", ordDir=-1;
 const abertos={}, minimizados={};
 
+/* ---------- menu de escolha múltipla (reutilizável) ---------- */
+function criarMulti(elId, rotulo, opcoes, arr){
+  // opcoes = [{v, txt}]; arr = array em F que guarda os valores selecionados
+  const el=document.getElementById(elId); if(!el) return;
+  const atualizaBtn=()=>{
+    const btn=el.querySelector(".ms-btn");
+    if(!arr.length){ btn.textContent="Todas"; btn.classList.remove("tem"); }
+    else if(arr.length===1){ const o=opcoes.find(o=>o.v===arr[0]); btn.textContent=(o?o.txt:arr[0]); btn.classList.add("tem"); }
+    else { btn.textContent=arr.length+" selecionadas"; btn.classList.add("tem"); }
+  };
+  el.innerHTML=`<button type="button" class="ms-btn"></button>
+    <div class="ms-panel">
+      ${opcoes.map(o=>`<label class="ms-opt"><input type="checkbox" value="${esc(o.v)}" ${arr.includes(o.v)?"checked":""}> <span>${esc(o.txt)}</span></label>`).join("")}
+      <div class="ms-acts"><button type="button" data-a="todas">Limpar</button><button type="button" data-a="fechar">Fechar</button></div>
+    </div>`;
+  const btn=el.querySelector(".ms-btn");
+  btn.onclick=(e)=>{ e.stopPropagation(); document.querySelectorAll(".ms.aberto").forEach(m=>{if(m!==el)m.classList.remove("aberto");}); el.classList.toggle("aberto"); };
+  el.querySelectorAll('input[type=checkbox]').forEach(chk=>chk.onchange=()=>{
+    const v=chk.value;
+    if(chk.checked){ if(!arr.includes(v)) arr.push(v); } else { const i=arr.indexOf(v); if(i>=0) arr.splice(i,1); }
+    atualizaBtn(); render();
+  });
+  el.querySelector('[data-a="todas"]').onclick=(e)=>{ e.stopPropagation(); arr.length=0; el.querySelectorAll('input[type=checkbox]').forEach(c=>c.checked=false); atualizaBtn(); render(); };
+  el.querySelector('[data-a="fechar"]').onclick=(e)=>{ e.stopPropagation(); el.classList.remove("aberto"); };
+  el.querySelector(".ms-panel").onclick=(e)=>e.stopPropagation();
+  atualizaBtn();
+}
+
 /* ---------- construir filtros dinâmicos ---------- */
 function initFiltros(){
-  // categorias
-  const cbox=document.getElementById("cats");
-  const mk=(c,txt)=>`<div class="cat-btn ${c===""?"activo":""}" data-c="${c}">${txt}</div>`;
-  cbox.innerHTML=mk("","Todas")+CATS.map(c=>mk(c,c)).join("");
-  cbox.querySelectorAll(".cat-btn").forEach(b=>b.onclick=()=>{
-    F.cat=b.dataset.c; cbox.querySelectorAll(".cat-btn").forEach(x=>x.classList.remove("activo"));
-    b.classList.add("activo"); render();
-  });
-  // tipos de procedimento
+  criarMulti("msCat","Categoria", CATS.map(c=>({v:c,txt:c})), F.cat);
+  criarMulti("msEstado","Marcação", [
+    {v:"analisar",txt:"🔍 A analisar"},{v:"concorrer",txt:"✅ A concorrer"},{v:"descartado",txt:"✖ Descartados"},
+    {v:"semmarca",txt:"Sem marcação"},{v:"comobs",txt:"Com observações"}], F.estado);
   const tp=[...new Set(REGS.map(r=>r.proc).filter(Boolean))].sort();
-  document.getElementById("fTipoProc").innerHTML='<option value="">Todos</option>'+tp.map(t=>`<option>${esc(t)}</option>`).join("");
+  criarMulti("msProc","Tipo de procedimento", tp.map(t=>({v:t,txt:t})), F.proc);
+  criarMulti("msLotes","Lotes", [{v:"Sim",txt:"Com lotes"},{v:"Não",txt:"Sem lotes"}], F.lotes);
+  criarMulti("msAmb","Crit. ambiental", [{v:"Sim",txt:"Sim"},{v:"Não",txt:"Não"}], F.amb);
 }
+// fechar menus ao clicar fora
+document.addEventListener("click",()=>document.querySelectorAll(".ms.aberto").forEach(m=>m.classList.remove("aberto")));
 // datas por defeito: intervalo todo dos dados carregados
 function definirDatasDefeito(){
   const dias=[...new Set(REGS.map(r=>r.data))].sort();
@@ -230,18 +265,12 @@ function initEventos(){
   document.getElementById("vAte").onchange=e=>{F.ate=e.target.value;render();};
   document.getElementById("btnAtualizar").onclick=atualizarDaNuvem;
   document.getElementById("pesquisa").oninput=e=>{F.pesq=e.target.value.trim();render();};
-  document.getElementById("fEstado").onchange=e=>{F.estado=e.target.value;render();};
-  document.getElementById("fTipoProc").onchange=e=>{F.proc=e.target.value;render();};
-  document.getElementById("fLotes").onchange=e=>{F.lotes=e.target.value;render();};
-  document.getElementById("fAmb").onchange=e=>{F.amb=e.target.value;render();};
   document.getElementById("fVmin").oninput=e=>{F.vmin=e.target.value?+e.target.value:null;render();};
   document.getElementById("fVmax").oninput=e=>{F.vmax=e.target.value?+e.target.value:null;render();};
   document.getElementById("btnLimpar").onclick=()=>{
-    Object.assign(F,{cat:"",estado:"",proc:"",lotes:"",amb:"",vmin:null,vmax:null});
-    ["fEstado","fTipoProc","fLotes","fAmb","fVmin","fVmax"].forEach(id=>document.getElementById(id).value="");
-    document.querySelectorAll("#cats .cat-btn").forEach(x=>x.classList.remove("activo"));
-    document.querySelector('#cats .cat-btn[data-c=""]').classList.add("activo");
-    render();
+    F.cat.length=0; F.estado.length=0; F.proc.length=0; F.lotes.length=0; F.amb.length=0; F.vmin=null; F.vmax=null;
+    document.getElementById("fVmin").value=""; document.getElementById("fVmax").value="";
+    initFiltros(); render();
   };
   document.getElementById("btnToggleTodos").onclick=()=>{
     const algumAberto=CATS.some(c=>!minimizados[c] && grupoTem(c));
@@ -260,16 +289,20 @@ function filtrados(){
   return REGS.filter(r=>{
     if(F.de && r.data<F.de) return false;
     if(F.ate && r.data>F.ate) return false;
-    if(F.cat && r.cat!==F.cat) return false;
-    if(F.proc && r.proc!==F.proc) return false;
-    if(F.lotes){ const tem=Array.isArray(r.lotes)&&r.lotes.length>0; if(F.lotes==="Sim"&&!tem)return false; if(F.lotes==="Não"&&tem)return false; }
-    if(F.amb && (r.amb||"")!==F.amb) return false;
+    if(F.cat.length && !F.cat.includes(r.cat)) return false;
+    if(F.proc.length && !F.proc.includes(r.proc)) return false;
+    if(F.lotes.length){ const tem=Array.isArray(r.lotes)&&r.lotes.length>0; const q=tem?"Sim":"Não"; if(!F.lotes.includes(q))return false; }
+    if(F.amb.length && !F.amb.includes(r.amb||"")) return false;
     if(F.vmin!=null && !(r.preco>=F.vmin)) return false;
     if(F.vmax!=null && !(r.preco<=F.vmax)) return false;
     const a=anot(r.n);
-    if(F.estado==="semmarca" && a.estado) return false;
-    if(F.estado==="comobs" && !(a.obs&&a.obs.trim())) return false;
-    if(["analisar","concorrer","descartado"].includes(F.estado) && a.estado!==F.estado) return false;
+    if(F.estado.length){
+      const marc=["analisar","concorrer","descartado"].filter(x=>F.estado.includes(x));
+      const ok = (marc.length ? marc.includes(a.estado) : false)
+        || (F.estado.includes("semmarca") && !a.estado)
+        || (F.estado.includes("comobs") && a.obs && a.obs.trim());
+      if(!ok) return false;
+    }
     if(termos.length){
       const blob=[r.n,r.ent,r.obj,r.nif,r.proc,(r.cpv||[]).join(" "),(r.lotes||[]).join(" "),a.obs].join(" ").toLowerCase();
       if(!termos.every(t=>blob.includes(t))) return false;
