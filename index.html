@@ -103,6 +103,7 @@
   tr.linha.e-analisar td{background:#eaf3fc}
   tr.linha.e-concorrer td{background:#e7f6ee}
   tr.linha.e-descartado td{background:#f3f4f7;opacity:.62}
+  tr.linha.e-decl td{background:#ffe8cf}
   .ent{font-weight:600}
   .obj{color:var(--muted);font-size:12px;margin-top:2px;max-width:440px}
   a.dr{color:var(--accent);text-decoration:none;font-weight:600;white-space:nowrap}
@@ -418,8 +419,11 @@ function filtrados(){
     return true;
   });
 }
+const ORD_MARCA={concorrer:0,analisar:1,"":3,descartado:4};
+function chaveMarca(r){ const a=anot(r.n); return (ORD_MARCA[a.estado]??3)*2 + (a.decl?0:1); }
 function ordenar(arr){
   const s=[...arr].sort((a,b)=>{
+    if(ordCampo==="marca"){ return (chaveMarca(a)-chaveMarca(b))*ordDir; }
     let x=a[ordCampo], y=b[ordCampo];
     if(ordCampo==="preco"){ x=x||0; y=y||0; return (x-y)*ordDir; }
     x=(x==null?"":String(x)).toLowerCase(); y=(y==null?"":String(y)).toLowerCase();
@@ -468,7 +472,7 @@ function render(){
             <th data-o="preco" class="num">Preço base</th>
             <th data-o="dlim" class="nw">Data limite</th>
             <th class="nw">DR</th>
-            <th class="nw">Marcação</th>
+            <th data-o="marca" class="nw">Marcação</th>
           </tr></thead>
           <tbody></tbody>
         </table>
@@ -488,7 +492,7 @@ function render(){
 function linha(r){
   const a=anot(r.n);
   const tr=document.createElement("tr");
-  tr.className="linha"+(a.estado?(" e-"+a.estado):"");
+  tr.className="linha"+(a.estado?(" e-"+a.estado):"")+(a.decl?" e-decl":"");
   const urg=r.urg?` <span class="pill urg">urgente</span>`:"";
   tr.innerHTML=`
     <td><input type="checkbox" ${SEL.has(r.n)?"checked":""}></td>

@@ -99,39 +99,66 @@ def extrair(t, href):
         "urg":1 if re.search(r"concurso p[úu]blico urgente",t,re.I) else 0,
         "cat":("Serviços de fiscalização" if is_fisc(obj,[g(r"Vocabul[áa]rio [Pp]rincipal:\s*([^\n]+)")]) else categoria(tc)),"pdf":"https://diariodarepublica.pt"+href}
 
-async def dr_ao_vivo(de, ate):
+async def _recolher_dia(pg, dia, hrefs):
+    """Pesquisa um único dia e recolhe os hrefs de todas as páginas (robusto à paginação com janela)."""
+    await pg.goto("https://diariodarepublica.pt/dr/pesquisa-avancada", wait_until="domcontentloaded", timeout=60000)
+    await pg.wait_for_timeout(5000)
+    await pg.evaluate("()=>document.getElementById('CheckboxAtos10').click()")
+    await pg.wait_for_timeout(2500)
+    await pg.evaluate("""(dia)=>{function s(el,v){const p=Object.getPrototypeOf(el);Object.getOwnPropertyDescriptor(p,'value').set.call(el,v);el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));el.dispatchEvent(new Event('blur',{bubbles:true}));}s(document.getElementById('Input_DataDe'),dia);s(document.getElementById('Input_DataAte'),dia);}""", dia)
+    await pg.wait_for_timeout(800)
+    await pg.evaluate("()=>document.getElementById('Pesquisar').click()")
+    await pg.wait_for_timeout(6000)
+    # facet "Anúncio de procedimento"
+    try:
+        await pg.evaluate("""()=>{const t=[...document.querySelectorAll('.vscomp-toggle-button')][0];if(t)t.click();}""")
+        await pg.wait_for_timeout(1200)
+        await pg.evaluate("""()=>{const o=[...document.querySelectorAll('.vscomp-option')].find(o=>/Anúncio de procedimento/i.test(o.innerText));if(o)o.click();document.body.click();}""")
+        await pg.wait_for_timeout(4000)
+    except Exception as e:
+        log("facet:", e)
+    antes_dia=len(hrefs)
+    estagnado=0
+    for _ in range(40):
+        hs=await pg.evaluate("""()=>[...document.querySelectorAll('a[href*=\"anuncio-procedimento\"]')].map(a=>a.getAttribute('href'))""")
+        n0=len(hrefs); hrefs.update(hs)
+        # avançar de página: tenta nº(atual+1); senão uma seta "seguinte"; senão o maior nº visível > atual
+        adv=await pg.evaluate("""()=>{
+          const btns=[...document.querySelectorAll('button.pagination-button')];
+          if(!btns.length) return 'end';
+          const act=btns.find(b=>b.classList.contains('is--act'));
+          const cur=act?parseInt(act.innerText):1;
+          let nb=btns.find(b=>parseInt(b.innerText)===cur+1);
+          if(!nb){
+            const cont=(act||btns[0]).closest('[class*=pagina i],ul,nav,div')||document;
+            const cl=[...cont.querySelectorAll('button,a')];
+            nb=cl.find(e=>{const t=(e.innerText||'').trim(); const al=(e.getAttribute('aria-label')||''); return (t===''&&e.querySelector('svg,i'))||/›|»|seguinte|next|pr[oó]xim/i.test(t+' '+al);});
+          }
+          if(!nb){ const maiores=btns.map(b=>parseInt(b.innerText)).filter(n=>n>cur).sort((a,b)=>a-b); if(maiores.length){ nb=btns.find(b=>parseInt(b.innerText)===maiores[0]); } }
+          if(!nb) return 'end';
+          nb.click(); return 'clicked';
+        }""")
+        if adv!='clicked': break
+        await pg.wait_for_timeout(3400)
+        if len(hrefs)==n0:
+            estagnado+=1
+            if estagnado>=2: break
+        else:
+            estagnado=0
+    log(f"DR {dia}: +{len(hrefs)-antes_dia} hrefs")
+
+async def dr_ao_vivo(dias):
     from playwright.async_api import async_playwright
     recs=[]
     async with async_playwright() as p:
         b=await p.chromium.launch(args=["--no-sandbox"])
         ctx=await b.new_context(); pg=await ctx.new_page()
-        await pg.goto("https://diariodarepublica.pt/dr/pesquisa-avancada", wait_until="domcontentloaded", timeout=60000)
-        await pg.wait_for_timeout(5000)
-        await pg.evaluate("()=>document.getElementById('CheckboxAtos10').click()")
-        await pg.wait_for_timeout(2500)
-        await pg.evaluate("""([de,ate])=>{function s(el,v){const p=Object.getPrototypeOf(el);Object.getOwnPropertyDescriptor(p,'value').set.call(el,v);el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));el.dispatchEvent(new Event('blur',{bubbles:true}));}s(document.getElementById('Input_DataDe'),de);s(document.getElementById('Input_DataAte'),ate);}""", [de, ate])
-        await pg.wait_for_timeout(800)
-        await pg.evaluate("()=>document.getElementById('Pesquisar').click()")
-        await pg.wait_for_timeout(6000)
-        # facet "Anúncio de procedimento"
-        try:
-            await pg.evaluate("""()=>{const t=[...document.querySelectorAll('.vscomp-toggle-button')][0];if(t)t.click();}""")
-            await pg.wait_for_timeout(1200)
-            await pg.evaluate("""()=>{const o=[...document.querySelectorAll('.vscomp-option')].find(o=>/Anúncio de procedimento/i.test(o.innerText));if(o)o.click();document.body.click();}""")
-            await pg.wait_for_timeout(4000)
-        except Exception as e: log("facet:", e)
-        # paginação -> recolher hrefs
         hrefs=set()
-        for pagina in range(1,40):
-            got=await pg.evaluate("""(p)=>{const b=[...document.querySelectorAll('button.pagination-button')].find(x=>x.innerText.trim()===String(p));if(p>1){if(!b)return null;b.click();}return true;}""", pagina)
-            if got is None: break
-            await pg.wait_for_timeout(2800)
-            hs=await pg.evaluate("""()=>[...document.querySelectorAll('a[href*=\"anuncio-procedimento\"]')].map(a=>a.getAttribute('href'))""")
-            before=len(hrefs); hrefs.update(hs)
-            if len(hrefs)==before and pagina>1: break
+        for dia in dias:
+            try: await _recolher_dia(pg, dia, hrefs)
+            except Exception as e: log("dia", dia, "falhou:", repr(e))
         hrefs=list(hrefs)
-        log(f"DR: {len(hrefs)} anúncios a extrair ({de}..{ate})")
-        # extrair detalhes em paralelo
+        log(f"DR: {len(hrefs)} anúncios a extrair ({len(dias)} dias)")
         sem=asyncio.Semaphore(6)
         async def um(href):
             async with sem:
@@ -144,7 +171,7 @@ async def dr_ao_vivo(de, ate):
                         t=await pp.evaluate("()=>document.body.innerText")
                         if "ENTIDADE ADJUDICANTE" in t: break
                     return extrair(t, href)
-                except Exception as e:
+                except Exception:
                     return None
                 finally:
                     await pp.close()
@@ -158,15 +185,20 @@ def main():
     log("A obter oficial…")
     recs=oficial(ano)
     log(f"oficial: {len(recs)} anúncios")
-    # DR ao vivo: do dia a seguir ao máximo oficial até hoje
+    # DR ao vivo: dias úteis desde o último dia de PROCEDIMENTOS no oficial até hoje (dia a dia, robusto)
     try:
-        maxof=max((r["data"] for r in recs), default=None)
+        proc_dates=[r["data"] for r in recs if not r.get("alt")]
+        maxof=max(proc_dates) if proc_dates else None
         hoje=datetime.date.today()
         ini=(datetime.date.fromisoformat(maxof)+datetime.timedelta(days=1)) if maxof else (hoje-datetime.timedelta(days=10))
-        if ini<=hoje:
-            de=ini.strftime("%Y-%m-%d"); ate=hoje.strftime("%Y-%m-%d")
-            drs=asyncio.run(dr_ao_vivo(de, ate))
-            log(f"DR ao vivo: {len(drs)} anúncios")
+        todos=[]; d=ini
+        while d<=hoje:
+            if d.weekday()<5: todos.append(d.strftime("%Y-%m-%d"))
+            d+=datetime.timedelta(days=1)
+        dias=todos[-12:]   # no máximo os 12 dias úteis mais recentes
+        if dias:
+            drs=asyncio.run(dr_ao_vivo(dias))
+            log(f"DR ao vivo: {len(drs)} anúncios em {len(dias)} dias")
             recs+=drs
     except Exception as e:
         log("DR ao vivo indisponível:", repr(e))
