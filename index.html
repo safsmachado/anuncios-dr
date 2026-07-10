@@ -72,6 +72,7 @@
   .grupo-cab.Servicos{background:var(--serv-bg);color:var(--serv)}
   .grupo-cab.Fornecimento{background:var(--forn-bg);color:var(--forn)}
   .grupo-cab.Concessoes{background:var(--conc-bg);color:var(--conc)}
+  .grupo-cab.Alteracoes{background:#fff3e0;color:#8a5a00}
   .grupo-cab.Outros{background:var(--outros-bg);color:var(--outros)}
   .grupo .tabela-wrap{display:none}
   .grupo.aberto .tabela-wrap{display:block}
@@ -128,6 +129,16 @@
       <label>até</label>
       <input type="date" id="vAte">
     </div>
+    <div class="campo">
+      <label>Períodos rápidos</label>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <button class="acao" id="btnRecente">Dia mais recente</button>
+        <button class="acao" id="btnUltimos">Últimos</button>
+        <input type="number" id="fNdias" value="7" min="1" max="120" style="width:58px">
+        <span style="font-size:12px;color:var(--muted)">dias</span>
+        <button class="acao" id="btnTodos">Todos</button>
+      </div>
+    </div>
     <div class="campo" style="flex:1;min-width:300px">
       <label>Pesquisa em tudo (vários termos com ; )</label>
       <input type="search" id="pesquisa" placeholder="ex.: escola; ambulância; 45233141">
@@ -155,15 +166,15 @@
   <div id="vazio" style="display:none">Sem resultados para o período/filtros/pesquisa actuais.</div>
 
   <p class="nota">
-    <b>Como usar:</b> clique no cabeçalho de um grupo para o minimizar/abrir; clique numa linha para ver toda a informação do anúncio e escrever observações; use o selector de cada linha para marcar «A analisar», «A concorrer» ou «Descartado». As marcações e observações ficam <b>guardadas neste computador</b> automaticamente. Para ver datas anteriores use os campos «Ver de/até». A página <b>atualiza-se sozinha todos os dias</b> — pode carregar em «↻ Atualizar» a qualquer momento para ver as novidades.<br>
+    <b>Como usar:</b> clique no cabeçalho de um grupo para o minimizar/abrir; clique numa linha para ver toda a informação do anúncio e escrever observações; use o selector de cada linha para marcar «A analisar», «A concorrer» ou «Descartado». As marcações e observações ficam <b>guardadas na nuvem</b> e acompanham-no em qualquer computador. Para ver datas anteriores use os campos «Ver de/até». A página <b>atualiza-se sozinha todos os dias</b> — pode carregar em «↻ Atualizar» a qualquer momento para ver as novidades.<br>
     <b>Fonte:</b> dados oficiais do Portal BASE / IMPIC (dados.gov.pt). O link «DR» de cada anúncio abre o PDF oficial no Diário da República.
   </p>
 </main>
 
 <script>
 let META={gerado:"",de:"",ate:"",janela:120,n:0};
-const CATS=["Obras","Serviços","Fornecimento de bens","Concessões","Outros"];
-const CLS={"Obras":"Obras","Serviços":"Servicos","Fornecimento de bens":"Fornecimento","Concessões":"Concessoes","Outros":"Outros"};
+const CATS=["Obras","Serviços","Fornecimento de bens","Concessões","Alterações de procedimento","Outros"];
+const CLS={"Obras":"Obras","Serviços":"Servicos","Fornecimento de bens":"Fornecimento","Concessões":"Concessoes","Alterações de procedimento":"Alteracoes","Outros":"Outros"};
 let REGS=[];      // todos os anúncios (vindos do ficheiro dados.json.gz no mesmo servidor)
 
 /* ---------- utilitários ---------- */
@@ -172,13 +183,42 @@ const dmy=s=>{ if(!s)return "—"; const p=s.split("-"); return p.length===3?`${
 const esc=s=> (s==null?"":String(s)).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 function slug(n){ return "a"+String(n).replace(/[^a-zA-Z0-9]/g,"_"); }
 
-/* ---------- marcações (guardadas localmente) ---------- */
+/* ---------- marcações (guardadas na nuvem, sincronizadas entre computadores) ---------- */
+const MARC_BASE="adr-safsm-marc-9f3k7q2m8w4z6t1c";  // chave privada da SUA lista de marcações
 let MARC={};
 try{ MARC=JSON.parse(localStorage.getItem("adr_marcacoes")||"{}"); }catch(e){ MARC={}; }
 function anot(n){ return MARC[n]||{estado:"",obs:""}; }
 function guardarMarc(){ try{ localStorage.setItem("adr_marcacoes",JSON.stringify(MARC)); }catch(e){} }
-function setEstado(n,v){ const a=anot(n); a.estado=v; MARC[n]=a; guardarMarc(); }
-function setObs(n,v){ const a=anot(n); a.obs=v; MARC[n]=a; guardarMarc(); }
+function setEstado(n,v){ const a=anot(n); a.estado=v; MARC[n]=a; guardarMarc(); agendarPush(); }
+function setObs(n,v){ const a=anot(n); a.obs=v; MARC[n]=a; guardarMarc(); agendarPush(); }
+/* --- sincronização na nuvem (textdb) --- */
+async function _gz64(str){ const gz=await new Response(new Blob([str]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer(); let b=""; new Uint8Array(gz).forEach(x=>b+=String.fromCharCode(x)); return btoa(b); }
+async function _ungz64(b64){ const bin=Uint8Array.from(atob(b64),c=>c.charCodeAt(0)); return await new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream("gzip"))).text(); }
+async function _lerM(k,tent){ for(let i=0;i<(tent||3);i++){ try{ const r=await fetch("https://textdb.online/"+encodeURIComponent(k),{cache:"no-store"}); if(r.ok){ const x=await r.text(); if(x) return x; } }catch(e){} await new Promise(s=>setTimeout(s,400)); } return null; }
+const _enc2=v=>encodeURIComponent(encodeURIComponent(v));
+async function puxarMarc(){
+  try{
+    const meta=await _lerM(MARC_BASE+"-m-meta",2); if(!meta) return false;
+    const m=JSON.parse(meta); if(!m.n) return false;
+    let b64=""; for(let i=0;i<m.n;i++){ const bl=await _lerM(MARC_BASE+"-m-"+i,3); if(bl==null) return false; b64+=bl; }
+    const remoto=JSON.parse(await _ungz64(b64));
+    MARC=Object.assign({}, MARC, remoto);   // remoto (o mais recente partilhado) prevalece; mantém marcações locais que ainda não subiram
+    guardarMarc(); return true;
+  }catch(e){ return false; }
+}
+let _pt=null, _pushing=false;
+function agendarPush(){ clearTimeout(_pt); _pt=setTimeout(empurrarMarc,1500); }
+async function empurrarMarc(){
+  if(_pushing){ agendarPush(); return; }
+  _pushing=true;
+  try{
+    const b64=await _gz64(JSON.stringify(MARC));
+    const blocks=[]; for(let i=0;i<b64.length;i+=8000) blocks.push(b64.slice(i,i+8000));
+    for(let i=0;i<blocks.length;i++){ await fetch("https://textdb.online/update/?key="+encodeURIComponent(MARC_BASE+"-m-"+i)+"&value="+_enc2(blocks[i]),{mode:"no-cors"}); await new Promise(s=>setTimeout(s,300)); }
+    await fetch("https://textdb.online/update/?key="+encodeURIComponent(MARC_BASE+"-m-meta")+"&value="+_enc2(JSON.stringify({n:blocks.length})),{mode:"no-cors"});
+  }catch(e){}
+  _pushing=false;
+}
 
 /* ---------- ir buscar os dados ao mesmo servidor (dados.json.gz) ---------- */
 async function carregarDados(){
@@ -249,21 +289,28 @@ function initFiltros(){
 }
 // fechar menus ao clicar fora
 document.addEventListener("click",()=>document.querySelectorAll(".ms.aberto").forEach(m=>m.classList.remove("aberto")));
-// datas por defeito: intervalo todo dos dados carregados
+// ao arrancar: mostrar TODO o intervalo (os ~120 dias). Não é chamado nas atualizações (para não mexer nas datas escolhidas).
 function definirDatasDefeito(){
   const dias=[...new Set(REGS.map(r=>r.data))].sort();
   if(!dias.length) return;
-  const de=document.getElementById("vDe"), ate=document.getElementById("vAte");
-  if(!de.value){ de.value=dias[0]; F.de=dias[0]; }
-  // manter o "até" sempre no dia mais recente disponível
-  ate.value=dias[dias.length-1]; F.ate=dias[dias.length-1];
+  document.getElementById("vDe").value=dias[0]; F.de=dias[0];
+  document.getElementById("vAte").value=dias[dias.length-1]; F.ate=dias[dias.length-1];
 }
+
+// intervalo de datas disponível e utilitário
+function datasMinMax(){ const d=[...new Set(REGS.map(r=>r.data))].sort(); return d.length?{min:d[0],max:d[d.length-1]}:{min:null,max:null}; }
+function menosDias(iso,n){ const [a,m,dd]=iso.split("-").map(Number); const dt=new Date(Date.UTC(a,m-1,dd)); dt.setUTCDate(dt.getUTCDate()-(n-1)); return dt.toISOString().slice(0,10); }
+function aplicarPeriodo(de,ate){ document.getElementById("vDe").value=de; document.getElementById("vAte").value=ate; F.de=de; F.ate=ate; render(); }
 
 /* ---------- ligações ---------- */
 function initEventos(){
   document.getElementById("vDe").onchange=e=>{F.de=e.target.value;render();};
   document.getElementById("vAte").onchange=e=>{F.ate=e.target.value;render();};
   document.getElementById("btnAtualizar").onclick=atualizarDaNuvem;
+  document.getElementById("btnRecente").onclick=()=>{ const {max}=datasMinMax(); if(max) aplicarPeriodo(max,max); };
+  document.getElementById("btnUltimos").onclick=()=>{ const {min,max}=datasMinMax(); if(!max) return; let n=parseInt(document.getElementById("fNdias").value)||7; let de=menosDias(max,n); if(min&&de<min)de=min; aplicarPeriodo(de,max); };
+  document.getElementById("fNdias").onkeydown=e=>{ if(e.key==="Enter") document.getElementById("btnUltimos").click(); };
+  document.getElementById("btnTodos").onclick=()=>{ const {min,max}=datasMinMax(); if(min) aplicarPeriodo(min,max); };
   document.getElementById("pesquisa").oninput=e=>{F.pesq=e.target.value.trim();render();};
   document.getElementById("fVmin").oninput=e=>{F.vmin=e.target.value?+e.target.value:null;render();};
   document.getElementById("fVmax").oninput=e=>{F.vmax=e.target.value?+e.target.value:null;render();};
@@ -428,7 +475,7 @@ function toggleDetalhe(tr,r){
     <div class="full"><b>Lotes</b>${lotes}</div>
     <div class="full"><b>Plataforma / peças do procedimento</b>${r.plat?`<a class="dr" href="${esc(r.plat)}" target="_blank" rel="noopener">${esc(r.plat)}</a>`:"—"}</div>
     <div class="full"><b>Anúncio no Diário da República</b>${r.pdf?`<a class="dr" href="${esc(r.pdf)}" target="_blank" rel="noopener">Abrir PDF oficial ↗</a>`:"—"}</div>
-    <div class="obs-caixa"><b>Observações (guardadas neste computador)</b>
+    <div class="obs-caixa"><b>Observações (sincronizadas em todos os seus computadores)</b>
       <textarea placeholder="notas sobre este concurso…">${esc(a.obs||"")}</textarea>
       <div class="estado-obs"></div>
     </div>
@@ -504,7 +551,7 @@ async function atualizarDaNuvem(){
   const antes=REGS.length;
   try{
     await carregarDados();
-    initFiltros(); definirDatasDefeito(); mostrarStatus(); render();
+    initFiltros(); mostrarStatus(); render();
     const dif=REGS.length-antes;
     btn.textContent = dif>0 ? `↻ +${dif} novos` : "↻ Atualizado";
   }catch(e){ btn.textContent="↻ Falhou"; }
@@ -519,8 +566,11 @@ async function atualizarDaNuvem(){
     document.getElementById("status").innerHTML=`<span style="color:#b02a2a">Erro a carregar os dados: ${esc(e.message)}. Tente recarregar a página.</span>`;
   }
   initFiltros(); definirDatasDefeito(); initEventos(); mostrarStatus(); render();
-  // recarrega em silêncio a cada 30 min, para apanhar a atualização diária sem fechar a página
-  setInterval(async()=>{ try{ const a=REGS.length; await carregarDados(); if(REGS.length!==a){ initFiltros(); definirDatasDefeito(); mostrarStatus(); render(); } }catch(e){} }, 1800000);
+  // puxar as marcações da nuvem (para aparecerem as feitas noutro computador) e semear as locais
+  try{ if(await puxarMarc()){ render(); } agendarPush(); }catch(e){}
+  // recarrega em silêncio a cada 30 min (dados novos) e puxa marcações a cada 60s (sincronizar entre PCs)
+  setInterval(async()=>{ try{ const a=REGS.length; await carregarDados(); if(REGS.length!==a){ initFiltros(); mostrarStatus(); render(); } }catch(e){} }, 1800000);
+  setInterval(async()=>{ try{ const antes=JSON.stringify(MARC); if(await puxarMarc() && JSON.stringify(MARC)!==antes){ render(); } }catch(e){} }, 60000);
 })();
 </script>
 </body>

@@ -6,7 +6,7 @@ import json, gzip, datetime, urllib.request, sys, os, re, asyncio
 
 DATASET_ID = "66d72fbc58cd7a63dae28712"
 JANELA_DIAS = 120
-KEEP = {"Anúncio de procedimento", "Anúncio de concurso urgente"}
+KEEP = {"Anúncio de procedimento", "Anúncio de concurso urgente", "Anúncio de Alteração"}
 
 def log(*a): print(*a, file=sys.stderr, flush=True)
 
@@ -55,12 +55,14 @@ def oficial(ano):
         if not dp: continue
         try: preco=float(r.get("PrecoBase")) if r.get("PrecoBase") not in (None,"") else None
         except Exception: preco=None
+        ta=r.get("tipoActo")
+        cat = "Alterações de procedimento" if ta=="Anúncio de Alteração" else categoria(r.get("tiposContrato"))
         out.append({"n":r.get("nAnuncio"),"data":dp,"ent":r.get("designacaoEntidade"),"nif":r.get("nifEntidade"),
             "obj":r.get("descricaoAnuncio"),"preco":preco,"cpv":r.get("CPVs"),"proc":r.get("modeloAnuncio"),
             "prazo":r.get("PrazoPropostas"),"dlim":iso(r.get("DataLimitePropostas","") or ""),
             "plat":r.get("PecasProcedimento"),"lotes":r.get("Lotes"),"amb":r.get("CriterAmbient"),
-            "urg":1 if r.get("tipoActo")=="Anúncio de concurso urgente" else 0,
-            "cat":categoria(r.get("tiposContrato")),"pdf":r.get("url")})
+            "urg":1 if ta=="Anúncio de concurso urgente" else 0, "alt":1 if ta=="Anúncio de Alteração" else 0,
+            "cat":cat,"pdf":r.get("url")})
     return out
 
 # ---------- Fonte 2: DR ao vivo (Playwright) ----------
