@@ -2,9 +2,10 @@ name: Atualizar e publicar Anúncios DR
 
 on:
   schedule:
-    - cron: '0 6 * * *'
-    - cron: '0 12 * * *'
-  workflow_dispatch: {}
+    - cron: '0 6 * * *'    # ~07:00 Lisboa
+    - cron: '0 12 * * *'   # ~13:00 Lisboa
+    - cron: '0 16 * * *'   # ~17:00 Lisboa (apanha anúncios publicados durante a tarde)
+  workflow_dispatch: {}     # botão "Run workflow" manual
   push:
     branches: [ main ]
 
@@ -20,6 +21,7 @@ concurrency:
 jobs:
   build-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 30     # nunca fica pendurado mais de 30 min
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
