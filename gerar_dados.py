@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-# Corre no GitHub Actions. Produz dados.json.gz = {gerado, de, ate, janela, regs:[...]}
+# Corre no GitHub Actions. Produz dados.json.gz = {ver, gerado, hora, de, ate, janela, regs:[...]}
 # Fonte 1: Portal BASE/IMPIC (dados.gov.pt) — fiável, ~1 semana de atraso.
 # Fonte 2: Diário da República (site) via Playwright — dias mais recentes.
 import json, gzip, datetime, urllib.request, sys, os, re, asyncio
 
+VERSAO = "7.2"          # versão da app/dados (aparece na página)
 DATASET_ID = "66d72fbc58cd7a63dae28712"
 JANELA_DIAS = 120
 KEEP = {"Anúncio de procedimento", "Anúncio de concurso urgente", "Anúncio de Alteração"}
@@ -25,10 +26,10 @@ def iso(s):
     try: return datetime.datetime.strptime(s, "%d/%m/%Y").strftime("%Y-%m-%d")
     except Exception: return None
 
-def iso2(s):  # aceita aaaa-mm-dd (passa igual) OU dd-mm-aaaa (converte)
+def iso2(s):  # aceita aaaa-mm-dd (passa igual) OU dd-mm-aaaa / dd/mm/aaaa (converte)
     s=(s or "").strip()
     if re.match(r"^\d{4}-\d{2}-\d{2}$", s): return s
-    m=re.search(r"(\d{2})-(\d{2})-(\d{4})", s)
+    m=re.search(r"(\d{2})[-/](\d{2})[-/](\d{4})", s)
     return f"{m[3]}-{m[2]}-{m[1]}" if m else ""
 
 def categoria(tcs):
@@ -55,7 +56,9 @@ def oficial(ano):
     for r in meta["resources"]:
         if r.get("format")=="json" and r.get("title","").lower()==f"anuncios{ano}.json":
             url=r.get("latest") or r["url"]; break
-    if not url: return []
+    if not url:
+        log(f"oficial: ficheiro anuncios{ano}.json não encontrado")
+        return []
     raw=json.loads(http_get(url))
     out=[]
     for r in raw:
@@ -109,43 +112,53 @@ async def _recolher_dia(pg, dia, hrefs):
     await pg.wait_for_timeout(800)
     await pg.evaluate("()=>document.getElementById('Pesquisar').click()")
     await pg.wait_for_timeout(6000)
-    # facet "Anúncio de procedimento"
+    # facet "Anúncio de procedimento" (lê também o total anunciado pelo site, para autocontrolo)
+    esperado=None
     try:
         await pg.evaluate("""()=>{const t=[...document.querySelectorAll('.vscomp-toggle-button')][0];if(t)t.click();}""")
         await pg.wait_for_timeout(1200)
+        txt=await pg.evaluate("""()=>{const o=[...document.querySelectorAll('.vscomp-option')].find(o=>/Anúncio de procedimento/i.test(o.innerText));return o?o.innerText:'';}""")
+        m=re.search(r"(\d+)\s*$", (txt or "").strip())
+        esperado=int(m[1]) if m else None
         await pg.evaluate("""()=>{const o=[...document.querySelectorAll('.vscomp-option')].find(o=>/Anúncio de procedimento/i.test(o.innerText));if(o)o.click();document.body.click();}""")
         await pg.wait_for_timeout(4000)
     except Exception as e:
         log("facet:", e)
     antes_dia=len(hrefs)
-    estagnado=0
-    for _ in range(40):
-        hs=await pg.evaluate("""()=>[...document.querySelectorAll('a[href*=\"anuncio-procedimento\"]')].map(a=>a.getAttribute('href'))""")
-        n0=len(hrefs); hrefs.update(hs)
-        # avançar de página: tenta nº(atual+1); senão uma seta "seguinte"; senão o maior nº visível > atual
-        adv=await pg.evaluate("""()=>{
+    # Percorre TODAS as páginas. Validado ao vivo em 2026-07-10 (688/688 anúncios em 06–10/07):
+    # a página ativa tem a classe "is--active" (ou aria-current="true"); só termina na última página;
+    # a paginação some durante o carregamento, por isso espera-se que reapareça e que o nº ativo mude.
+    for _ in range(60):
+        for _t in range(10):   # espera a paginação renderizar (nos dias com ≤25 resultados não existe)
+            n_btns=await pg.evaluate("()=>document.querySelectorAll('button.pagination-button').length")
+            if n_btns: break
+            await pg.wait_for_timeout(700)
+        est=await pg.evaluate("""()=>{
           const btns=[...document.querySelectorAll('button.pagination-button')];
-          if(!btns.length) return 'end';
-          const act=btns.find(b=>b.classList.contains('is--act'));
-          const cur=act?parseInt(act.innerText):1;
-          let nb=btns.find(b=>parseInt(b.innerText)===cur+1);
-          if(!nb){
-            const cont=(act||btns[0]).closest('[class*=pagina i],ul,nav,div')||document;
-            const cl=[...cont.querySelectorAll('button,a')];
-            nb=cl.find(e=>{const t=(e.innerText||'').trim(); const al=(e.getAttribute('aria-label')||''); return (t===''&&e.querySelector('svg,i'))||/›|»|seguinte|next|pr[oó]xim/i.test(t+' '+al);});
-          }
-          if(!nb){ const maiores=btns.map(b=>parseInt(b.innerText)).filter(n=>n>cur).sort((a,b)=>a-b); if(maiores.length){ nb=btns.find(b=>parseInt(b.innerText)===maiores[0]); } }
-          if(!nb) return 'end';
-          nb.click(); return 'clicked';
+          const act=btns.find(b=>b.classList.contains('is--active')||b.classList.contains('is--act')||b.getAttribute('aria-current')==='true');
+          const nums=btns.map(b=>parseInt(b.innerText)).filter(n=>!isNaN(n));
+          return {cur: act?parseInt(act.innerText):1, ult: nums.length?Math.max(...nums):1};
         }""")
-        if adv!='clicked': break
-        await pg.wait_for_timeout(3400)
-        if len(hrefs)==n0:
-            estagnado+=1
-            if estagnado>=2: break
-        else:
-            estagnado=0
-    log(f"DR {dia}: +{len(hrefs)-antes_dia} hrefs")
+        hs=await pg.evaluate("""()=>[...document.querySelectorAll('a[href*=\"anuncio-procedimento\"]')].map(a=>a.getAttribute('href'))""")
+        hrefs.update(hs)
+        if est["cur"]>=est["ult"]: break     # última página: fim verdadeiro
+        clicked=await pg.evaluate("""(cur)=>{
+          const btns=[...document.querySelectorAll('button.pagination-button')];
+          let nb=btns.find(b=>parseInt(b.innerText)===cur+1);
+          if(!nb) nb=btns.find(b=>/seguinte|next|pr[oó]xim/i.test(b.getAttribute('aria-label')||''));
+          if(!nb) return false;
+          nb.click(); return true;
+        }""", est["cur"])
+        if not clicked: break
+        for _t in range(24):   # espera a página ativa mudar de número (máx 12 s)
+            await pg.wait_for_timeout(500)
+            cur2=await pg.evaluate("""()=>{const act=[...document.querySelectorAll('button.pagination-button')].find(b=>b.classList.contains('is--active')||b.getAttribute('aria-current')==='true');return act?parseInt(act.innerText):0;}""")
+            if cur2 and cur2!=est["cur"]: break
+        await pg.wait_for_timeout(900)       # deixar os 25 links renderizar
+    rec=len(hrefs)-antes_dia
+    log(f"DR {dia}: +{rec} hrefs" + (f" (site diz {esperado})" if esperado is not None else ""))
+    if esperado is not None and rec<esperado:
+        log(f"AVISO: DR {dia} pode estar incompleto ({rec}<{esperado})")
 
 async def dr_ao_vivo(dias):
     from playwright.async_api import async_playwright
@@ -180,16 +193,30 @@ async def dr_ao_vivo(dias):
         await b.close()
     return recs
 
+def hora_lisboa():
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%H:%M")
+    except Exception:
+        return datetime.datetime.utcnow().strftime("%H:%M")
+
 def main():
-    ano=datetime.date.today().year
-    log("A obter oficial…")
-    recs=oficial(ano)
-    log(f"oficial: {len(recs)} anúncios")
+    hoje=datetime.date.today()
+    # No início do ano a janela de 120 dias apanha o ano anterior — vai buscar os dois ficheiros
+    anos=sorted({(hoje-datetime.timedelta(days=JANELA_DIAS+14)).year, hoje.year})
+    recs=[]
+    for ano in anos:
+        log(f"A obter oficial {ano}…")
+        try:
+            parte=oficial(ano)
+            log(f"oficial {ano}: {len(parte)} anúncios")
+            recs+=parte
+        except Exception as e:
+            log(f"oficial {ano} falhou:", repr(e))
     # DR ao vivo: dias úteis desde o último dia de PROCEDIMENTOS no oficial até hoje (dia a dia, robusto)
     try:
         proc_dates=[r["data"] for r in recs if not r.get("alt")]
         maxof=max(proc_dates) if proc_dates else None
-        hoje=datetime.date.today()
         ini=(datetime.date.fromisoformat(maxof)+datetime.timedelta(days=1)) if maxof else (hoje-datetime.timedelta(days=10))
         todos=[]; d=ini
         while d<=hoje:
@@ -203,14 +230,18 @@ def main():
     except Exception as e:
         log("DR ao vivo indisponível:", repr(e))
 
+    if not recs:
+        log("ERRO: nenhum anúncio obtido (oficial e DR falharam). Não escrevo dados para não estragar o site.")
+        sys.exit(1)
+
     ultimo=max(r["data"] for r in recs)
     corte=(datetime.date.fromisoformat(ultimo)-datetime.timedelta(days=JANELA_DIAS)).isoformat()
     porN={}
-    for r in recs:
-        if r["data"]>=corte: porN[r["n"]]=r
+    for r in recs:               # o oficial vem primeiro na lista ⇒ fica com prioridade
+        if r["data"]>=corte: porN.setdefault(r["n"], r)
     janela=sorted(porN.values(), key=lambda x:(x["data"], str(x["n"])))
     de=min(r["data"] for r in janela); ate=max(r["data"] for r in janela)
-    obj={"gerado":datetime.date.today().isoformat(),"de":de,"ate":ate,"janela":JANELA_DIAS,"regs":janela}
+    obj={"ver":VERSAO,"gerado":hoje.isoformat(),"hora":hora_lisboa(),"de":de,"ate":ate,"janela":JANELA_DIAS,"regs":janela}
     data=json.dumps(obj, ensure_ascii=False).encode("utf-8")
     with gzip.open(os.path.join(os.path.dirname(os.path.abspath(__file__)),"dados.json.gz"),"wb") as f:
         f.write(data)

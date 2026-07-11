@@ -18,6 +18,7 @@
   header h1{margin:0;font-size:17px;font-weight:600}
   header .resumo{font-size:13px;opacity:.92}
   #info{margin-left:auto;font-size:12px;padding:4px 12px;border-radius:20px;background:rgba(255,255,255,.15)}
+  #versao{font-size:11px;opacity:.85;padding:3px 9px;border-radius:12px;background:rgba(255,255,255,.12);cursor:default;white-space:nowrap}
   #verifBox{display:flex;align-items:center;gap:7px;font-size:12px}
   #verifBox label{opacity:.9}
   #verifBox select{font-size:12px;padding:3px 6px;border-radius:6px;border:none}
@@ -136,6 +137,7 @@
   <h1>Anúncios Concursos DR</h1>
   <span class="resumo" id="resumo"></span>
   <span id="info"></span>
+  <span id="versao" title="Versão da aplicação"></span>
   <span id="verifBox">
     <label>Sou:</label>
     <select id="euSel"><option value="">—</option><option value="SAFSM">SAFSM</option><option value="JMF">JMF</option></select>
@@ -184,19 +186,20 @@
     <button class="acao" id="btnLimpar">Limpar filtros</button>
   </div>
 
-  <div id="status"></div>
+  <div id="status">A carregar os anúncios…</div>
 
   <div id="conteudo"></div>
   <div id="vazio" style="display:none">Sem resultados para o período/filtros/pesquisa actuais.</div>
 
   <p class="nota">
-    <b>Como usar:</b> clique no cabeçalho de um grupo para o minimizar/abrir; clique numa linha para ver toda a informação do anúncio e escrever observações; use o selector de cada linha para marcar «A analisar», «A concorrer» ou «Descartado». As marcações e observações ficam <b>guardadas na nuvem</b> e acompanham-no em qualquer computador. Para ver datas anteriores use os campos «Ver de/até». A página <b>atualiza-se sozinha todos os dias</b> — pode carregar em «↻ Atualizar» a qualquer momento para ver as novidades.<br>
+    <b>Como usar:</b> clique no cabeçalho de um grupo para o minimizar/abrir; clique numa linha para ver toda a informação do anúncio e escrever observações; use o selector de cada linha para marcar «A analisar», «A concorrer» ou «Descartado». As marcações e observações ficam <b>guardadas na nuvem</b> e acompanham-no em qualquer computador. Ao abrir, a página mostra os <b>últimos 7 dias</b> (abre mais depressa); para ver mais atrás use os campos «Ver de/até» ou o botão «Todos». A página <b>atualiza-se sozinha todos os dias</b> — pode carregar em «↻ Atualizar» a qualquer momento para ver as novidades.<br>
     <b>Fonte:</b> dados oficiais do Portal BASE / IMPIC (dados.gov.pt). O link «DR» de cada anúncio abre o PDF oficial no Diário da República.
   </p>
 </main>
 
 <script>
-let META={gerado:"",de:"",ate:"",janela:120,n:0};
+const APP_VER="7.2";        // versão da aplicação (mostrada no canto superior direito)
+let META={ver:"",gerado:"",hora:"",de:"",ate:"",janela:120,n:0};
 const CATS=["Obras","Serviços","Serviços de fiscalização","Fornecimento de bens","Concessões","Alterações de procedimento","Outros"];
 const CLS={"Obras":"Obras","Serviços":"Servicos","Serviços de fiscalização":"Fiscalizacao","Fornecimento de bens":"Fornecimento","Concessões":"Concessoes","Alterações de procedimento":"Alteracoes","Outros":"Outros"};
 let REGS=[];      // todos os anúncios (vindos do ficheiro dados.json.gz no mesmo servidor)
@@ -205,7 +208,8 @@ let REGS=[];      // todos os anúncios (vindos do ficheiro dados.json.gz no mes
 const eur=n=> (n==null||isNaN(n))?"—":new Intl.NumberFormat("pt-PT",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(n);
 const dmy=s=>{ if(!s)return "—"; const p=s.split("-"); return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:s; };
 const esc=s=> (s==null?"":String(s)).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-function slug(n){ return "a"+String(n).replace(/[^a-zA-Z0-9]/g,"_"); }
+// adia uma ação repetida (ex.: escrever na pesquisa) para a página não engasgar
+function debounce(fn,ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms); }; }
 
 /* ---------- marcações (guardadas na nuvem, sincronizadas entre computadores) ---------- */
 const MARC_BASE="adr-safsm-marc-9f3k7q2m8w4z6t1c";  // chave privada da SUA lista de marcações
@@ -298,7 +302,7 @@ async function carregarDados(){
     obj=await r.json();
   }
   REGS=obj.regs||[];
-  META={gerado:obj.gerado||"",de:obj.de||"",ate:obj.ate||"",janela:obj.janela||120,n:REGS.length};
+  META={ver:obj.ver||"",gerado:obj.gerado||"",hora:obj.hora||"",de:obj.de||"",ate:obj.ate||"",janela:obj.janela||120,n:REGS.length};
 }
 
 /* ---------- estado dos filtros/vista ---------- */
@@ -347,12 +351,15 @@ function initFiltros(){
 }
 // fechar menus ao clicar fora
 document.addEventListener("click",()=>document.querySelectorAll(".ms.aberto").forEach(m=>m.classList.remove("aberto")));
-// ao arrancar: mostrar TODO o intervalo (os ~120 dias). Não é chamado nas atualizações (para não mexer nas datas escolhidas).
+// ao arrancar: mostrar só os ÚLTIMOS 7 DIAS (a página abre muito mais depressa; o botão «Todos» mostra tudo).
+// Não é chamado nas atualizações (para não mexer nas datas escolhidas).
 function definirDatasDefeito(){
   const dias=[...new Set(REGS.map(r=>r.data))].sort();
   if(!dias.length) return;
-  document.getElementById("vDe").value=dias[0]; F.de=dias[0];
-  document.getElementById("vAte").value=dias[dias.length-1]; F.ate=dias[dias.length-1];
+  const max=dias[dias.length-1];
+  let de=menosDias(max,7); if(de<dias[0]) de=dias[0];
+  document.getElementById("vDe").value=de; F.de=de;
+  document.getElementById("vAte").value=max; F.ate=max;
 }
 
 // intervalo de datas disponível e utilitário
@@ -372,9 +379,10 @@ function initEventos(){
   document.getElementById("btnUltimos").onclick=()=>{ const {min,max}=datasMinMax(); if(!max) return; let n=parseInt(document.getElementById("fNdias").value)||7; let de=menosDias(max,n); if(min&&de<min)de=min; aplicarPeriodo(de,max); };
   document.getElementById("fNdias").onkeydown=e=>{ if(e.key==="Enter") document.getElementById("btnUltimos").click(); };
   document.getElementById("btnTodos").onclick=()=>{ const {min,max}=datasMinMax(); if(min) aplicarPeriodo(min,max); };
-  document.getElementById("pesquisa").oninput=e=>{F.pesq=e.target.value.trim();render();};
-  document.getElementById("fVmin").oninput=e=>{F.vmin=e.target.value?+e.target.value:null;render();};
-  document.getElementById("fVmax").oninput=e=>{F.vmax=e.target.value?+e.target.value:null;render();};
+  const rendLento=debounce(render,250);   // espera 1/4 de segundo depois de parar de escrever
+  document.getElementById("pesquisa").oninput=e=>{F.pesq=e.target.value.trim();rendLento();};
+  document.getElementById("fVmin").oninput=e=>{F.vmin=e.target.value?+e.target.value:null;rendLento();};
+  document.getElementById("fVmax").oninput=e=>{F.vmax=e.target.value?+e.target.value:null;rendLento();};
   document.getElementById("btnLimpar").onclick=()=>{
     F.cat.length=0; F.estado.length=0; F.proc.length=0; F.lotes.length=0; F.amb.length=0; F.vmin=null; F.vmax=null;
     document.getElementById("fVmin").value=""; document.getElementById("fVmax").value="";
@@ -603,9 +611,12 @@ function mostrarStatus(){
   const dias=[...new Set(REGS.map(r=>r.data))];
   const maxd=dias.length?dias.sort()[dias.length-1]:META.ate;
   document.getElementById("info").innerHTML=`Anúncios até <b>${dmy(maxd)}</b>`;
+  const v=document.getElementById("versao");
+  v.textContent="v"+APP_VER;
+  v.title=`Versão da aplicação: ${APP_VER}`+(META.ver&&META.ver!==APP_VER?` · dados gerados pela versão ${META.ver}`:"")+(META.gerado?` · dados atualizados a ${dmy(META.gerado)}${META.hora?" às "+META.hora:""}`:"");
   document.getElementById("status").innerHTML=
     `${REGS.length} anúncios · ${dmy(META.de)}–${dmy(maxd)} · fonte Portal BASE/IMPIC + Diário da República` +
-    (META.gerado?` · atualizado ${dmy(META.gerado)}`:``);
+    (META.gerado?` · atualizado ${dmy(META.gerado)}${META.hora?" "+META.hora:""}`:``) + ` · v${APP_VER}`;
   renderVerif();
 }
 
@@ -616,8 +627,13 @@ async function atualizarDaNuvem(){
   const btn=document.getElementById("btnAtualizar");
   const txt=btn.textContent; btn.textContent="↻ a atualizar…"; btn.disabled=true;
   const antes=REGS.length;
+  const maxAntes=datasMinMax().max;
   try{
     await carregarDados();
+    try{ await puxarMarc(); await lerVerif(); }catch(_){}   // traz também marcações e verificação feitas noutro computador
+    // se estava a ver até ao dia mais recente, avança o «até» para o novo dia mais recente (senão os novos ficavam escondidos)
+    const maxDepois=datasMinMax().max;
+    if(maxDepois && (F.ate||"")<maxDepois && (!F.ate || !maxAntes || F.ate>=maxAntes)){ F.ate=maxDepois; document.getElementById("vAte").value=maxDepois; }
     initFiltros(); mostrarStatus(); render();
     const dif=REGS.length-antes;
     btn.textContent = dif>0 ? `↻ +${dif} novos` : "↻ Atualizado";
