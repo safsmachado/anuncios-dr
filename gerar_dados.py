@@ -4,7 +4,7 @@
 # Fonte 2: Diário da República (site) via Playwright — dias mais recentes.
 import json, gzip, datetime, urllib.request, sys, os, re, asyncio
 
-VERSAO = "7.2"          # versão da app/dados (aparece na página)
+VERSAO = "7.3"          # versão da app/dados (aparece na página)
 DATASET_ID = "66d72fbc58cd7a63dae28712"
 JANELA_DIAS = 120
 KEEP = {"Anúncio de procedimento", "Anúncio de concurso urgente", "Anúncio de Alteração"}
@@ -105,13 +105,35 @@ def extrair(t, href):
 async def _recolher_dia(pg, dia, hrefs):
     """Pesquisa um único dia e recolhe os hrefs de todas as páginas (robusto à paginação com janela)."""
     await pg.goto("https://diariodarepublica.pt/dr/pesquisa-avancada", wait_until="domcontentloaded", timeout=60000)
-    await pg.wait_for_timeout(5000)
-    await pg.evaluate("()=>document.getElementById('CheckboxAtos10').click()")
+    # espera a SPA renderizar o formulário (em vez de esperar um tempo fixo)
+    await pg.wait_for_selector("#CheckboxAtos10", timeout=45000)
     await pg.wait_for_timeout(2500)
-    await pg.evaluate("""(dia)=>{function s(el,v){const p=Object.getPrototypeOf(el);Object.getOwnPropertyDescriptor(p,'value').set.call(el,v);el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));el.dispatchEvent(new Event('blur',{bubbles:true}));}s(document.getElementById('Input_DataDe'),dia);s(document.getElementById('Input_DataAte'),dia);}""", dia)
-    await pg.wait_for_timeout(800)
+    # liga a 2.ª série e espera os campos de data aparecerem.
+    # IMPORTANTE: a SPA às vezes ANULA o 1.º clique (re-render) — verificar e insistir.
+    ok=False
+    for tent in range(4):
+        marcado=await pg.evaluate("()=>{const c=document.getElementById('CheckboxAtos10');return c?c.checked:null;}")
+        if marcado is not True:
+            await pg.evaluate("()=>{const c=document.getElementById('CheckboxAtos10');if(c)c.click();}")
+        for _ in range(12):
+            await pg.wait_for_timeout(800)
+            if await pg.evaluate("()=>!!(document.getElementById('Input_DataDe')&&document.getElementById('Input_DataAte'))"):
+                ok=True; break
+        if ok: break
+        log(f"DR {dia}: campos de data ainda não apareceram (tentativa {tent+1})")
+    if not ok:
+        raise RuntimeError(f"DR {dia}: campos de data não apareceram")
+    # põe as datas e CONFIRMA que ficaram lá (senão repete)
+    for tent in range(3):
+        await pg.evaluate("""(dia)=>{function s(el,v){const p=Object.getPrototypeOf(el);Object.getOwnPropertyDescriptor(p,'value').set.call(el,v);el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));el.dispatchEvent(new Event('blur',{bubbles:true}));}s(document.getElementById('Input_DataDe'),dia);s(document.getElementById('Input_DataAte'),dia);}""", dia)
+        await pg.wait_for_timeout(900)
+        v=await pg.evaluate("()=>[document.getElementById('Input_DataDe').value,document.getElementById('Input_DataAte').value]")
+        if v==[dia,dia]: break
     await pg.evaluate("()=>document.getElementById('Pesquisar').click()")
-    await pg.wait_for_timeout(6000)
+    # espera os resultados de verdade: o menu «Refinar Pesquisa» (vscomp) só existe na página de resultados
+    for _ in range(30):
+        await pg.wait_for_timeout(1000)
+        if await pg.evaluate("()=>document.querySelectorAll('.vscomp-toggle-button').length>0"): break
     # facet "Anúncio de procedimento" (lê também o total anunciado pelo site, para autocontrolo)
     esperado=None
     try:
@@ -167,9 +189,16 @@ async def dr_ao_vivo(dias):
         b=await p.chromium.launch(args=["--no-sandbox"])
         ctx=await b.new_context(); pg=await ctx.new_page()
         hrefs=set()
+        falhados=[]
         for dia in dias:
             try: await _recolher_dia(pg, dia, hrefs)
-            except Exception as e: log("dia", dia, "falhou:", repr(e))
+            except Exception as e: log("dia", dia, "falhou:", repr(e)); falhados.append(dia)
+        # 2.ª volta para os dias que falharam (página nova, do zero)
+        for dia in falhados:
+            try:
+                await pg.close(); pg=await ctx.new_page()
+                await _recolher_dia(pg, dia, hrefs)
+            except Exception as e: log("dia", dia, "falhou 2x:", repr(e))
         hrefs=list(hrefs)
         log(f"DR: {len(hrefs)} anúncios a extrair ({len(dias)} dias)")
         sem=asyncio.Semaphore(6)
