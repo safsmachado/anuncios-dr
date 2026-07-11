@@ -4,7 +4,7 @@
 # Fonte 2: Diário da República (site) via Playwright — dias mais recentes.
 import json, gzip, datetime, urllib.request, sys, os, re, asyncio
 
-VERSAO = "7.3"          # versão da app/dados (aparece na página)
+VERSAO = "7.4"          # versão da app/dados (aparece na página)
 DATASET_ID = "66d72fbc58cd7a63dae28712"
 JANELA_DIAS = 120
 KEEP = {"Anúncio de procedimento", "Anúncio de concurso urgente", "Anúncio de Alteração"}
@@ -49,6 +49,19 @@ def is_fisc(obj, cpvs):
         if code[:5] in ("71247","71248","71520","71521"): return True
     return False
 
+def is_proj(obj, cpvs, cat_base):
+    """Serviços de elaboração/revisão de projeto (arquitetura/engenharia).
+    CPVs: 71240xx-71246xx (serviços de arquitetura/engenharia e planeamento, exceto 71247/71248=fiscalização)
+    e 7132xxx (serviços de conceção técnica). Por texto, só quando o contrato é de Serviços."""
+    for c in (cpvs or []):
+        code=str(c).split(" ")[0].split("-")[0]
+        if code[:5] in ("71240","71241","71242","71243","71244","71245","71246"): return True
+        if code[:4]=="7132": return True
+    if cat_base=="Serviços" and re.search(
+        r"(elabora\w+|revis\w+|conce\w+|execu[çc]\w+)\s+d[eoa]s?\s+projec?to|projec?to\s+de\s+execu[çc]|estudo\s+pr[ée]vio", obj or "", re.I):
+        return True
+    return False
+
 # ---------- Fonte 1: oficial ----------
 def oficial(ano):
     meta=json.loads(http_get(f"https://dados.gov.pt/api/1/datasets/{DATASET_ID}/"))
@@ -68,12 +81,15 @@ def oficial(ano):
         try: preco=float(r.get("PrecoBase")) if r.get("PrecoBase") not in (None,"") else None
         except Exception: preco=None
         ta=r.get("tipoActo")
+        cat_base=categoria(r.get("tiposContrato"))
         if ta=="Anúncio de Alteração":
             cat="Alterações de procedimento"
         elif is_fisc(r.get("descricaoAnuncio"), r.get("CPVs")):
             cat="Serviços de fiscalização"
+        elif is_proj(r.get("descricaoAnuncio"), r.get("CPVs"), cat_base):
+            cat="Serviços de projeto"
         else:
-            cat=categoria(r.get("tiposContrato"))
+            cat=cat_base
         out.append({"n":r.get("nAnuncio"),"data":dp,"ent":r.get("designacaoEntidade"),"nif":r.get("nifEntidade"),
             "obj":r.get("descricaoAnuncio"),"preco":preco,"cpv":r.get("CPVs"),"proc":r.get("modeloAnuncio"),
             "prazo":r.get("PrazoPropostas"),"dlim":iso(r.get("DataLimitePropostas","") or ""),
@@ -100,7 +116,13 @@ def extrair(t, href):
         "plat":g(r"Plataforma eletr[óo]nica[^:\n]*:\s*([^\n]+)"),
         "lotes":["Sim"] if re.search(r"Procedimento com lotes\s*\?\s*Sim",t,re.I) else None,"amb":"",
         "urg":1 if re.search(r"concurso p[úu]blico urgente",t,re.I) else 0,
-        "cat":("Serviços de fiscalização" if is_fisc(obj,[g(r"Vocabul[áa]rio [Pp]rincipal:\s*([^\n]+)")]) else categoria(tc)),"pdf":"https://diariodarepublica.pt"+href}
+        "cat":_cat_dr(obj, [g(r"Vocabul[áa]rio [Pp]rincipal:\s*([^\n]+)")], tc),"pdf":"https://diariodarepublica.pt"+href}
+
+def _cat_dr(obj, cpvs, tc):
+    base=categoria(tc)
+    if is_fisc(obj, cpvs): return "Serviços de fiscalização"
+    if is_proj(obj, cpvs, base): return "Serviços de projeto"
+    return base
 
 async def _recolher_dia(pg, dia, hrefs):
     """Pesquisa um único dia e recolhe os hrefs de todas as páginas (robusto à paginação com janela)."""

@@ -73,6 +73,16 @@
   .ms-acts button:hover{text-decoration:underline}
 
   #status{font-size:12.5px;color:var(--muted);margin:2px 2px 8px}
+  #contadores{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 10px}
+  .cnt{border:1px solid var(--line);background:#fff;border-radius:20px;padding:5px 12px;font-size:12.5px;cursor:pointer;user-select:none;white-space:nowrap}
+  .cnt b{font-variant-numeric:tabular-nums}
+  .cnt:hover{border-color:var(--accent)}
+  .cnt.activo{border-width:2px;font-weight:600;padding:4px 11px}
+  .cnt[data-e="analisar"].activo{border-color:#4a90d9;background:#eaf3fc;color:#20507e}
+  .cnt[data-e="concorrer"].activo{border-color:#3aa06a;background:#e7f6ee;color:#186a3b}
+  .cnt[data-e="descartado"].activo{border-color:#99a;background:#eef0f4;color:#445}
+  .cnt[data-e="decl"].activo{border-color:#b3540a;background:#fdefe3;color:#8a4106}
+  .cnt[data-e="comobs"].activo{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
   .ajuda{font-size:12.5px;color:var(--muted);max-width:420px;line-height:1.5}
 
   .grupo{margin-top:14px}
@@ -86,6 +96,7 @@
   .grupo-cab.Fornecimento{background:var(--forn-bg);color:var(--forn)}
   .grupo-cab.Concessoes{background:var(--conc-bg);color:var(--conc)}
   .grupo-cab.Fiscalizacao{background:#e6f7fb;color:#0a6a86}
+  .grupo-cab.Projeto{background:#e7e9fb;color:#3730a3}
   .grupo-cab.Alteracoes{background:#fff3e0;color:#8a5a00}
   .grupo-cab.Outros{background:var(--outros-bg);color:var(--outros)}
   .grupo .tabela-wrap{display:none}
@@ -187,21 +198,22 @@
   </div>
 
   <div id="status">A carregar os anúncios…</div>
+  <div id="contadores" title="Total de anúncios marcados (em todo o período carregado). Clique para ver só esses."></div>
 
   <div id="conteudo"></div>
   <div id="vazio" style="display:none">Sem resultados para o período/filtros/pesquisa actuais.</div>
 
   <p class="nota">
-    <b>Como usar:</b> clique no cabeçalho de um grupo para o minimizar/abrir; clique numa linha para ver toda a informação do anúncio e escrever observações; use o selector de cada linha para marcar «A analisar», «A concorrer» ou «Descartado». As marcações e observações ficam <b>guardadas na nuvem</b> e acompanham-no em qualquer computador. Ao abrir, a página mostra os <b>últimos 7 dias</b> (abre mais depressa); para ver mais atrás use os campos «Ver de/até» ou o botão «Todos». A página <b>atualiza-se sozinha todos os dias</b> — pode carregar em «↻ Atualizar» a qualquer momento para ver as novidades.<br>
+    <b>Como usar:</b> clique no cabeçalho de um grupo para o minimizar/abrir; clique numa linha para ver toda a informação do anúncio e escrever observações; use o selector de cada linha para marcar «A analisar», «A concorrer» ou «Descartado». As marcações e observações ficam <b>guardadas na nuvem</b> e acompanham-no em qualquer computador. Os <b>contadores</b> por cima das tabelas mostram quantos anúncios estão em cada marcação — clique num contador para ver só esses. Ao marcar como <b>verificado</b> (semáforo), é enviado automaticamente um email à outra pessoa a avisar que tem coisas para ver. Ao abrir, a página mostra os <b>últimos 7 dias</b> (abre mais depressa); para ver mais atrás use os campos «Ver de/até» ou o botão «Todos». A página <b>atualiza-se sozinha todos os dias</b> — pode carregar em «↻ Atualizar» a qualquer momento para ver as novidades.<br>
     <b>Fonte:</b> dados oficiais do Portal BASE / IMPIC (dados.gov.pt). O link «DR» de cada anúncio abre o PDF oficial no Diário da República.
   </p>
 </main>
 
 <script>
-const APP_VER="7.3";        // versão da aplicação (mostrada no canto superior direito)
+const APP_VER="7.4";        // versão da aplicação (mostrada no canto superior direito)
 let META={ver:"",gerado:"",hora:"",de:"",ate:"",janela:120,n:0};
-const CATS=["Obras","Serviços","Serviços de fiscalização","Fornecimento de bens","Concessões","Alterações de procedimento","Outros"];
-const CLS={"Obras":"Obras","Serviços":"Servicos","Serviços de fiscalização":"Fiscalizacao","Fornecimento de bens":"Fornecimento","Concessões":"Concessoes","Alterações de procedimento":"Alteracoes","Outros":"Outros"};
+const CATS=["Obras","Serviços","Serviços de fiscalização","Serviços de projeto","Fornecimento de bens","Concessões","Alterações de procedimento","Outros"];
+const CLS={"Obras":"Obras","Serviços":"Servicos","Serviços de fiscalização":"Fiscalizacao","Serviços de projeto":"Projeto","Fornecimento de bens":"Fornecimento","Concessões":"Concessoes","Alterações de procedimento":"Alteracoes","Outros":"Outros"};
 let REGS=[];      // todos os anúncios (vindos do ficheiro dados.json.gz no mesmo servidor)
 
 /* ---------- utilitários ---------- */
@@ -256,10 +268,35 @@ let VERIF={por:"",em:"",alvo:""};
 function alvoAtual(){ return META.ate||""; }
 async function lerVerif(){ try{ const t=await _lerM(MARC_BASE+"-v",2); if(t){ VERIF=JSON.parse(t); return true; } }catch(e){} return false; }
 async function escreverVerif(){ try{ await fetch("https://textdb.online/update/?key="+encodeURIComponent(MARC_BASE+"-v")+"&value="+_enc2(JSON.stringify(VERIF)),{mode:"no-cors"}); }catch(e){} }
+/* Ao marcar como verificado, envia um email automático À OUTRA pessoa (FormSubmit — grátis;
+   no 1.º envio o destinatário recebe um email do FormSubmit e tem de clicar UMA vez em «Activate Form»). */
+const APP_URL="https://safsmachado.github.io/anuncios-dr/";
+async function enviarEmailVerif(){
+  const outro = EU==="SAFSM" ? "JMF" : "SAFSM";
+  const dest = PESSOAS[outro];
+  const c=contagens();
+  const corpo=`${EU} verificou os anúncios do Diário da República até ${dmy(alvoAtual())}.\n\n`+
+    `Tem coisas para ver na app:\n`+
+    `🔍 A analisar: ${c.analisar}\n✅ A concorrer: ${c.concorrer}\n📨 Declaração enviada: ${c.decl}\n✏️ Com observações: ${c.comobs}\n\n`+
+    `Abrir a app: ${APP_URL}`;
+  try{
+    const r=await fetch("https://formsubmit.co/ajax/"+dest,{method:"POST",
+      headers:{"Content-Type":"application/json","Accept":"application/json"},
+      body:JSON.stringify({name:"Anúncios Concursos DR", _subject:`Anúncios DR verificados por ${EU} — tem coisas para ver`, mensagem:corpo, _captcha:"false", _template:"box"})});
+    const j=await r.json().catch(()=>({}));
+    return {ok:r.ok && String(j.success)!=="false", outro};
+  }catch(e){ return {ok:false, outro}; }
+}
 function marcarVerificado(){
   if(!EU){ alert("Escolha primeiro quem é, no canto superior direito («Sou:»)."); const s=document.getElementById("euSel"); s.focus(); return; }
   VERIF={por:EU, em:new Date().toISOString(), alvo:alvoAtual()};
   escreverVerif(); renderVerif();
+  enviarEmailVerif().then(({ok,outro})=>{
+    const av=document.getElementById("aviso");
+    if(av && VERIF.por) av.insertAdjacentHTML("beforeend",
+      ok?` <span style="opacity:.85">· ✉ Email enviado a ${outro}.</span>`
+        :` <span style="opacity:.85">· ⚠ Não foi possível enviar o email a ${outro}.</span>`);
+  });
 }
 function renderVerif(){
   const alvo=alvoAtual();
@@ -448,8 +485,27 @@ function atualizaBotoesSel(){
   document.getElementById("btnPdf").textContent=`PDF (${n} sel.)`;
 }
 
+/* ---------- contadores de marcados (por marcador, sobre TODOS os anúncios carregados) ---------- */
+function contagens(){
+  const c={analisar:0,concorrer:0,descartado:0,decl:0,comobs:0};
+  REGS.forEach(r=>{ const a=anot(r.n); if(a.estado&&c[a.estado]!=null)c[a.estado]++; if(a.decl)c.decl++; if(a.obs&&a.obs.trim())c.comobs++; });
+  return c;
+}
+function renderContadores(){
+  const el=document.getElementById("contadores"); if(!el) return;
+  const c=contagens();
+  const itens=[["analisar","🔍 A analisar"],["concorrer","✅ A concorrer"],["descartado","✖ Descartados"],["decl","📨 Declaração enviada"],["comobs","✏️ Com observações"]];
+  el.innerHTML=itens.map(([k,txt])=>`<span class="cnt ${F.estado.includes(k)?"activo":""}" data-e="${k}">${txt}: <b>${c[k]}</b></span>`).join("");
+  el.querySelectorAll(".cnt").forEach(ch=>ch.onclick=()=>{
+    const k=ch.dataset.e; const i=F.estado.indexOf(k);
+    if(i>=0) F.estado.splice(i,1); else F.estado.push(k);
+    initFiltros(); render();
+  });
+}
+
 /* ---------- render ---------- */
 function render(){
+  renderContadores();
   const arr=filtrados();
   const cont=document.getElementById("conteudo");
   const totalVal=arr.reduce((s,r)=>s+(r.preco||0),0);
