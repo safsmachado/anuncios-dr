@@ -36,6 +36,10 @@
   .v-linha .v-no{opacity:.6}
   .v-linha .vbtn{padding:4px 10px;font-size:12px;margin-left:0}
   .v-linha .vbtn.primario{margin-left:auto}
+  .v-fech{margin-top:8px}
+  .v-fechtog{border:none;background:none;color:inherit;cursor:pointer;font-size:12.5px;opacity:.8;padding:2px 0}
+  .v-fechtog:hover{opacity:1;text-decoration:underline}
+  .v-linha-f{opacity:.75;background:rgba(255,255,255,.4)}
   /* botões mais pequenos no primeiro quadro */
   .painel-topo button.acao{padding:5px 9px;font-size:12px}
   .painel-topo input[type=date]{padding:5px 7px;font-size:12px}
@@ -218,7 +222,7 @@
 </main>
 
 <script>
-const APP_VER="7.6";        // versão da aplicação (mostrada no canto superior direito)
+const APP_VER="7.7";        // versão da aplicação (mostrada no canto superior direito)
 let META={ver:"",gerado:"",hora:"",de:"",ate:"",janela:120,n:0};
 const CATS=["Obras","Serviços","Serviços de fiscalização","Serviços de projeto","Fornecimento de bens","Concessões","Alterações de procedimento","Outros"];
 const CLS={"Obras":"Obras","Serviços":"Servicos","Serviços de fiscalização":"Fiscalizacao","Serviços de projeto":"Projeto","Fornecimento de bens":"Fornecimento","Concessões":"Concessoes","Alterações de procedimento":"Alteracoes","Outros":"Outros"};
@@ -289,6 +293,10 @@ function diasPainel(){   // últimos 5 dias com anúncios que ainda não foram f
   const ds=[...new Set(REGS.map(r=>r.data))].sort().reverse();
   return ds.filter(d=>!(VERIF.dias[d]&&VERIF.dias[d].fechado)).slice(0,5);
 }
+function diasFechados(){  // dias arquivados (fechado=1); os "fechados de vez" (fechado=2) não aparecem
+  return [...new Set(REGS.map(r=>r.data))].sort().reverse().filter(d=>VERIF.dias[d]&&VERIF.dias[d].fechado===1);
+}
+let mostrarFechados=false;
 function assinou(quem,d){ const v=VERIF.dias[d]&&VERIF.dias[d][quem]; return !!(v && v.fp===fpDia(d)); }
 function assinouAntes(quem,d){ return !!(VERIF.dias[d]&&VERIF.dias[d][quem]); }  // assinou, mas talvez desatualizado
 function fmtDH(iso){ const dt=new Date(iso||Date.now()); return dt.toLocaleDateString("pt-PT")+" "+dt.toLocaleTimeString("pt-PT",{hour:"2-digit",minute:"2-digit"}); }
@@ -327,8 +335,9 @@ function verificarDias(dias){
   escreverVerif(); renderVerif();
   enviarEmailVerif(dias).then(avisoEmail);
 }
-function fecharDia(d){ if(!VERIF.dias[d])VERIF.dias[d]={}; VERIF.dias[d].fechado=1; escreverVerif(); renderVerif(); }
+function fecharDia(d){ if(!VERIF.dias[d])VERIF.dias[d]={}; VERIF.dias[d].fechado=1; escreverVerif(); renderVerif(); }   // arquiva (reabrível)
 function reabrirDia(d){ if(VERIF.dias[d]){ VERIF.dias[d].fechado=0; escreverVerif(); renderVerif(); } }
+function fecharDefinitivo(d){ if(!confirm("Fechar o dia "+dmy(d)+" DE VEZ? Deixa de aparecer (mesmo na lista de fechados).")) return; if(!VERIF.dias[d])VERIF.dias[d]={}; VERIF.dias[d].fechado=2; escreverVerif(); renderVerif(); }
 
 function renderVerif(){
   const sem=document.getElementById("semaforo"); if(!sem) return;
@@ -355,9 +364,22 @@ function renderVerif(){
   const linhas=dias.map(d=>{
     const ambos=assinou("SAFSM",d)&&assinou("JMF",d);
     const btnEu=assinou(EU,d)?``:`<button class="acao vbtn" data-vd="${d}">Verificar</button>`;
-    const btnFechar=ambos?`<button class="acao vbtn" data-fd="${d}">✓ Fechar dia</button>`:``;
+    const btnFechar=ambos?`<button class="acao vbtn" data-fd="${d}" title="Arquiva o dia (fica na lista de fechados, pode reabrir)">✓ Fechar dia</button>`:``;
     return `<div class="v-linha"><span class="v-dia">${dmy(d)}</span>${cel("SAFSM",d)}${cel("JMF",d)}${btnEu}${btnFechar}</div>`;
   }).join("");
+
+  const fech=diasFechados();
+  let fechHtml="";
+  if(fech.length){
+    fechHtml=`<div class="v-fech"><button class="v-fechtog" data-tog="1">${mostrarFechados?"▾":"▸"} Dias fechados (${fech.length})</button>`;
+    if(mostrarFechados){
+      fechHtml+=`<div class="v-grid" style="margin-top:5px">`+fech.map(d=>
+        `<div class="v-linha v-linha-f"><span class="v-dia">${dmy(d)}</span><span class="v-no">✓ fechado</span>`+
+        `<button class="acao vbtn" data-rb="${d}" title="Volta a pôr o dia no quadro">Reabrir</button>`+
+        `<button class="acao vbtn" data-fdef="${d}" title="Remove de vez — deixa de aparecer">Fechar de vez</button></div>`).join("")+`</div>`;
+    }
+    fechHtml+=`</div>`;
+  }
 
   let topo;
   if(verde){
@@ -375,10 +397,13 @@ function renderVerif(){
   }
   if(EMAIL_MSG) topo+=` <span class="v-email">· ${EMAIL_MSG}</span>`;
   av.style.display="block";
-  av.innerHTML=`<div class="v-topo">${topo}</div><div class="v-grid">${linhas}</div>`;
+  av.innerHTML=`<div class="v-topo">${topo}</div><div class="v-grid">${linhas}</div>${fechHtml}`;
   av.querySelectorAll("[data-vd]").forEach(b=>b.onclick=()=>verificarDias([b.dataset.vd]));
   av.querySelectorAll("[data-fd]").forEach(b=>b.onclick=()=>fecharDia(b.dataset.fd));
   const vt=av.querySelector("[data-vtudo]"); if(vt) vt.onclick=()=>verificarDias(pend);
+  const tg=av.querySelector("[data-tog]"); if(tg) tg.onclick=()=>{ mostrarFechados=!mostrarFechados; renderVerif(); };
+  av.querySelectorAll("[data-rb]").forEach(b=>b.onclick=()=>reabrirDia(b.dataset.rb));
+  av.querySelectorAll("[data-fdef]").forEach(b=>b.onclick=()=>fecharDefinitivo(b.dataset.fdef));
 }
 
 /* ---------- ir buscar os dados ao mesmo servidor (dados.json.gz) ---------- */
