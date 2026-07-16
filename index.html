@@ -40,6 +40,23 @@
   .v-fechtog{border:none;background:none;color:inherit;cursor:pointer;font-size:12.5px;opacity:.8;padding:2px 0}
   .v-fechtog:hover{opacity:1;text-decoration:underline}
   .v-linha-f{opacity:.75;background:rgba(255,255,255,.4)}
+  /* painel de verificação por anúncio (topo) */
+  .pv{background:#fdf4e8;border:1px solid #f0d9b8;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:13px}
+  .pv.ok{background:#e7f6ee;border-color:#bfe6cf}
+  .pv-cab{margin-bottom:8px;color:#7a4a12}
+  .pv.ok .pv-cab{color:#186a3b}
+  .pv-lista{display:flex;flex-direction:column;gap:5px;max-height:340px;overflow:auto}
+  .pv-linha{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:6px 10px;flex-wrap:wrap}
+  .pv-ent{flex:1;min-width:220px;display:flex;flex-direction:column;line-height:1.25}
+  .pv-obj{color:var(--muted);font-size:11.5px}
+  .pv-badges{display:flex;gap:6px;white-space:nowrap}
+  .pv-est .pill{font-size:11px}
+  .pill-analisar{background:#eaf3fc;color:#20507e}
+  .pill-concorrer{background:#e7f6ee;color:#186a3b}
+  .pill-descartado{background:#eef0f4;color:#556}
+  .pv .vbtn{padding:4px 10px;font-size:12px}
+  .pv .v-ok,.pv .v-stale,.pv .v-no{font-size:12px}
+  .pv .v-no{opacity:.6}
   /* botões mais pequenos no primeiro quadro */
   .painel-topo button.acao{padding:5px 9px;font-size:12px}
   .painel-topo input[type=date]{padding:5px 7px;font-size:12px}
@@ -168,7 +185,7 @@
   </span>
 </header>
 <main>
-  <div id="aviso"></div>
+  <div id="painelVerif"></div>
   <div class="painel painel-topo">
     <div class="campo">
       <label>Ver — de</label>
@@ -222,7 +239,7 @@
 </main>
 
 <script>
-const APP_VER="7.7";        // versão da aplicação (mostrada no canto superior direito)
+const APP_VER="7.8";        // versão da aplicação (mostrada no canto superior direito)
 let META={ver:"",gerado:"",hora:"",de:"",ate:"",janela:120,n:0};
 const CATS=["Obras","Serviços","Serviços de fiscalização","Serviços de projeto","Fornecimento de bens","Concessões","Alterações de procedimento","Outros"];
 const CLS={"Obras":"Obras","Serviços":"Servicos","Serviços de fiscalização":"Fiscalizacao","Serviços de projeto":"Projeto","Fornecimento de bens":"Fornecimento","Concessões":"Concessoes","Alterações de procedimento":"Alteracoes","Outros":"Outros"};
@@ -273,137 +290,164 @@ async function empurrarMarc(){
   _pushing=false;
 }
 
-/* ---------- verificação por dia, a dois (ping-pong SAFSM ↔ JMF) ----------
-   VERIF.dias = { "AAAA-MM-DD": { SAFSM:{fp,em}, JMF:{fp,em}, fechado:0 } }
-   Cada pessoa "assina" o estado das marcações desse dia (fp = impressão digital das marcações).
-   Se depois alguém alterar uma marcação nesse dia, o fp muda e a verificação fica desatualizada
-   (o semáforo volta a vermelho e, ao verificar de novo, envia novo email). */
+/* ---------- verificação POR ANÚNCIO, a dois (ping-pong SAFSM ↔ JMF) ----------
+   Guardada dentro de cada MARC[n] (sincroniza pelo mesmo canal das marcações):
+     MARC[n].ver = { SAFSM:{estado,decl,obs,em}, JMF:{estado,decl,obs,em} }   ← "assinatura" do estado que cada um confirmou
+     MARC[n].fx  = 0 (ativo) | 1 (fechado/arquivado) | 2 (fechado de vez)
+   Uma pessoa "assinou" um anúncio se a sua assinatura for IGUAL ao estado atual das marcações.
+   Se depois alguém alterar a marcação, a assinatura deixa de bater certo → volta a "por verificar" para AMBOS. */
 const PESSOAS={SAFSM:"sfmachado@sa-machado.com", JMF:"jmfaria@sa-machado.com"};
 const APP_URL="https://safsmachado.github.io/anuncios-dr/";
 let EU=""; try{ EU=localStorage.getItem("adr_eu")||""; }catch(e){}
-let VERIF={dias:{}};
 let EMAIL_MSG="";
+let mostrarFechadosV=false;
 function outra(q){ return q==="SAFSM"?"JMF":"SAFSM"; }
-function hashStr(s){ let h=0; for(let i=0;i<s.length;i++){ h=(h*31+s.charCodeAt(i))|0; } return h; }
-function fpDia(d){   // impressão digital das marcações dos anúncios publicados nesse dia
-  const its=REGS.filter(r=>r.data===d).map(r=>{ const a=anot(r.n); return r.n+"|"+a.estado+"|"+(a.decl?1:0)+"|"+((a.obs||"").trim().length); }).sort();
-  return hashStr(its.join("¬"))+":"+its.length;
-}
-function diasPainel(){   // últimos 5 dias com anúncios que ainda não foram fechados
-  const ds=[...new Set(REGS.map(r=>r.data))].sort().reverse();
-  return ds.filter(d=>!(VERIF.dias[d]&&VERIF.dias[d].fechado)).slice(0,5);
-}
-function diasFechados(){  // dias arquivados (fechado=1); os "fechados de vez" (fechado=2) não aparecem
-  return [...new Set(REGS.map(r=>r.data))].sort().reverse().filter(d=>VERIF.dias[d]&&VERIF.dias[d].fechado===1);
-}
-let mostrarFechados=false;
-function assinou(quem,d){ const v=VERIF.dias[d]&&VERIF.dias[d][quem]; return !!(v && v.fp===fpDia(d)); }
-function assinouAntes(quem,d){ return !!(VERIF.dias[d]&&VERIF.dias[d][quem]); }  // assinou, mas talvez desatualizado
-function fmtDH(iso){ const dt=new Date(iso||Date.now()); return dt.toLocaleDateString("pt-PT")+" "+dt.toLocaleTimeString("pt-PT",{hour:"2-digit",minute:"2-digit"}); }
+function nomeEstado(e){ return ({analisar:"A analisar",concorrer:"A concorrer",descartado:"Descartado"})[e]||"sem marcação"; }
+function temMarca(a){ return !!(a.estado || (a.obs&&a.obs.trim()) || a.decl); }
+function fxOf(n){ return (MARC[n]&&MARC[n].fx)||0; }
+function verOf(n){ return (MARC[n]&&MARC[n].ver)||{}; }
+function snapAtual(n){ const a=anot(n); return {estado:a.estado||"", decl:a.decl?1:0, obs:(a.obs||"").trim()}; }
+function snapIgual(x,y){ return !!x && !!y && x.estado===(y.estado||"") && (x.decl?1:0)===(y.decl?1:0) && (x.obs||"")===(y.obs||""); }
+function assinou(quem,n){ return snapIgual(verOf(n)[quem], snapAtual(n)); }
+function assinouAntes(quem,n){ return !!verOf(n)[quem]; }
+function anunMarcados(){ return REGS.filter(r=>temMarca(anot(r.n)) && fxOf(r.n)===0); }
+function pendentesDe(quem){ return anunMarcados().filter(r=>!assinou(quem,r.n)); }
+function ordAnun(arr){ return [...arr].sort((a,b)=> a.data<b.data?1 : a.data>b.data?-1 : (String(a.n)>String(b.n)?1:-1)); }
+function anunFechados(){ return ordAnun(REGS.filter(r=>fxOf(r.n)===1)); }
 
-async function lerVerif(){ try{ const t=await _lerM(MARC_BASE+"-v2",2); if(t){ const o=JSON.parse(t); if(o&&o.dias){ VERIF=o; } return true; } }catch(e){} return false; }
-async function escreverVerif(){ try{ await fetch("https://textdb.online/update/?key="+encodeURIComponent(MARC_BASE+"-v2")+"&value="+_enc2(JSON.stringify(VERIF)),{mode:"no-cors"}); }catch(e){} }
+function exigeEu(){ if(!EU){ alert("Escolha primeiro quem é, no canto superior direito («Sou:»)."); const s=document.getElementById("euSel"); if(s)s.focus(); return false; } return true; }
 
-/* email automático à OUTRA pessoa (FormSubmit; no 1.º envio o destinatário clica uma vez em «Activate Form») */
-async function enviarEmailVerif(dias){
-  const outro=outra(EU), dest=PESSOAS[outro], c=contagens();
-  const corpo=`${EU} verificou os anúncios do Diário da República dos dias: ${dias.map(dmy).join(", ")}.\n\n`+
-    `Falta a SUA verificação (${outro}) para fechar esses dias.\n\n`+
-    `Marcados no período à vista: 🔍 ${c.analisar} · ✅ ${c.concorrer} · 📨 ${c.decl} · ✏️ ${c.comobs}\n\n`+
-    `Abrir a app e verificar: ${APP_URL}`;
-  try{
-    const r=await fetch("https://formsubmit.co/ajax/"+dest,{method:"POST",
-      headers:{"Content-Type":"application/json","Accept":"application/json"},
-      body:JSON.stringify({name:"Anúncios Concursos DR", _subject:`Anúncios DR verificados por ${EU} — falta a sua verificação`, mensagem:corpo, _captcha:"false", _template:"box"})});
-    const j=await r.json().catch(()=>({}));
-    if(/activat/i.test(j.message||"")) return {ativacao:true, outro};
-    return {ok:r.ok && String(j.success)!=="false", outro};
-  }catch(e){ return {ok:false, outro}; }
+/* descrição do que mudou desde a última assinatura DESTA pessoa (antes → depois) */
+function descreveMudanca(prev, cur){
+  if(!prev){
+    const ps=[];
+    if(cur.estado) ps.push("marcado «"+nomeEstado(cur.estado)+"»");
+    if(cur.decl) ps.push("declaração enviada");
+    if(cur.obs) ps.push('observação: "'+cur.obs.slice(0,160)+'"');
+    return "NOVO — "+(ps.join("; ")||"marcado");
+  }
+  const ps=[];
+  if((prev.estado||"")!==(cur.estado||"")) ps.push("marcação: "+nomeEstado(prev.estado)+" → "+nomeEstado(cur.estado));
+  if((prev.decl?1:0)!==(cur.decl?1:0)) ps.push("declaração enviada: "+(cur.decl?"sim":"não"));
+  if((prev.obs||"")!==(cur.obs||"")) ps.push('observação alterada: "'+(cur.obs||"").slice(0,160)+'"');
+  return ps.join("; ");
+}
+/* email COM as alterações, enviado aos DOIS emails registados */
+async function enviarEmailMudancas(mudancas){
+  let corpo;
+  if(!mudancas.length){
+    corpo=`${EU} verificou os anúncios. Não havia alterações novas desde a verificação anterior.\n\nApp: ${APP_URL}`;
+  } else {
+    corpo=`${EU} verificou ${mudancas.length} anúncio(s) com alterações:\n\n`+
+      mudancas.map(({r,desc})=>`• ${dmy(r.data)} — ${r.ent}\n  ${(r.obj||"").slice(0,160)}\n  Alteração: ${desc}\n  DR: ${r.pdf||"-"}`).join("\n\n")+
+      `\n\nAbrir a app: ${APP_URL}`;
+  }
+  const assunto=`Anúncios DR — ${EU} verificou ${mudancas.length} com alteração(ões)`;
+  const res={ok:false, ativacao:false};
+  for(const dest of [PESSOAS.SAFSM, PESSOAS.JMF]){
+    try{
+      const r=await fetch("https://formsubmit.co/ajax/"+dest,{method:"POST",
+        headers:{"Content-Type":"application/json","Accept":"application/json"},
+        body:JSON.stringify({name:"Anúncios Concursos DR", _subject:assunto, mensagem:corpo, _captcha:"false", _template:"box"})});
+      const j=await r.json().catch(()=>({}));
+      if(/activat/i.test(j.message||"")) res.ativacao=true;
+      else if(r.ok && String(j.success)!=="false") res.ok=true;
+    }catch(e){}
+  }
+  return res;
 }
 function avisoEmail(res){
-  if(res.ok) EMAIL_MSG=`✉ Email enviado a ${res.outro}.`;
-  else if(res.ativacao) EMAIL_MSG=`✉ ${res.outro} recebeu um email do FormSubmit — tem de clicar UMA vez em «Activate Form» para os avisos passarem a chegar.`;
-  else EMAIL_MSG=`⚠ Não foi possível enviar o email a ${res.outro}.`;
+  if(res.ok && !res.ativacao) EMAIL_MSG="✉ Email enviado aos dois.";
+  else if(res.ativacao) EMAIL_MSG="✉ Falta ativar o FormSubmit num dos emails — clicar «Activate Form» no email recebido (ver spam).";
+  else EMAIL_MSG="⚠ Não foi possível enviar o email.";
   renderVerif();
   clearTimeout(avisoEmail._t); avisoEmail._t=setTimeout(()=>{ EMAIL_MSG=""; renderVerif(); },9000);
 }
-function exigeEu(){ if(!EU){ alert("Escolha primeiro quem é, no canto superior direito («Sou:»)."); const s=document.getElementById("euSel"); if(s)s.focus(); return false; } return true; }
-function verificarDias(dias){
-  if(!exigeEu() || !dias.length) return;
+function verificarAnuncios(regs){
+  if(!exigeEu() || !regs.length) return;
   const agora=new Date().toISOString();
-  dias.forEach(d=>{ if(!VERIF.dias[d])VERIF.dias[d]={}; VERIF.dias[d][EU]={fp:fpDia(d),em:agora}; });
-  escreverVerif(); renderVerif();
-  enviarEmailVerif(dias).then(avisoEmail);
+  const mudancas=[];
+  regs.forEach(r=>{
+    const cur=snapAtual(r.n);
+    const desc=descreveMudanca(verOf(r.n)[EU], cur);   // o que mudou desde a MINHA última assinatura
+    if(desc) mudancas.push({r, desc});
+    if(!MARC[r.n]) MARC[r.n]={};
+    if(!MARC[r.n].ver) MARC[r.n].ver={};
+    MARC[r.n].ver[EU]={...cur, em:agora};
+  });
+  guardarMarc(); agendarPush(); render();
+  enviarEmailMudancas(mudancas).then(avisoEmail);
 }
-function fecharDia(d){ if(!VERIF.dias[d])VERIF.dias[d]={}; VERIF.dias[d].fechado=1; escreverVerif(); renderVerif(); }   // arquiva (reabrível)
-function reabrirDia(d){ if(VERIF.dias[d]){ VERIF.dias[d].fechado=0; escreverVerif(); renderVerif(); } }
-function fecharDefinitivo(d){ if(!confirm("Fechar o dia "+dmy(d)+" DE VEZ? Deixa de aparecer (mesmo na lista de fechados).")) return; if(!VERIF.dias[d])VERIF.dias[d]={}; VERIF.dias[d].fechado=2; escreverVerif(); renderVerif(); }
+function fecharAnuncio(n){ if(!MARC[n])MARC[n]={}; MARC[n].fx=1; guardarMarc(); agendarPush(); render(); }
+function reabrirAnuncio(n){ if(MARC[n]){ MARC[n].fx=0; guardarMarc(); agendarPush(); render(); } }
+function fecharAnunDefinitivo(n){ if(!confirm("Fechar este anúncio DE VEZ? Deixa de aparecer na verificação (mesmo nos fechados).")) return; if(!MARC[n])MARC[n]={}; MARC[n].fx=2; guardarMarc(); agendarPush(); render(); }
 
+function estBadge(e){ return e?`<span class="pill pill-${e}">${nomeEstado(e)}</span>`:`<span class="pill">sem marcação</span>`; }
+function vBadge(quem,n){
+  if(assinou(quem,n)) return `<span class="v-ok" title="verificado">🟢${quem}</span>`;
+  if(assinouAntes(quem,n)) return `<span class="v-stale" title="tinha verificado, mas houve alterações">🟠${quem}</span>`;
+  return `<span class="v-no">⚪${quem}</span>`;
+}
+function linhaAnun(r, fechada){
+  const a=anot(r.n);
+  const marcas=`${a.decl?" 📨":""}${a.obs&&a.obs.trim()?" ✏️":""}`;
+  const btns = fechada
+    ? `<button class="acao vbtn" data-rb="${esc(r.n)}" title="Volta a pôr o anúncio na verificação">Reabrir</button>`+
+      `<button class="acao vbtn" data-fdef="${esc(r.n)}" title="Remove de vez">Fechar de vez</button>`
+    : `${assinou(EU,r.n)?"":`<button class="acao vbtn" data-va="${esc(r.n)}">Verificar</button>`}`+
+      `<button class="acao vbtn" data-fa="${esc(r.n)}" title="Arquiva este anúncio (sai da lista, pode reabrir)">Fechar</button>`;
+  return `<div class="pv-linha${fechada?" v-linha-f":""}">`+
+    `<span class="v-dia">${dmy(r.data)}</span>`+
+    `<span class="pv-ent"><b>${esc(r.ent)}</b><span class="pv-obj">${esc((r.obj||"").slice(0,120))}</span></span>`+
+    `<span class="pv-est">${estBadge(a.estado)}${marcas}</span>`+
+    `<span class="pv-badges">${vBadge("SAFSM",r.n)}${vBadge("JMF",r.n)}</span>`+
+    `${r.pdf?`<a class="dr" href="${esc(r.pdf)}" target="_blank" rel="noopener">DR ↗</a>`:""}`+
+    btns+`</div>`;
+}
 function renderVerif(){
-  const sem=document.getElementById("semaforo"); if(!sem) return;
-  const av=document.getElementById("aviso");
+  const sem=document.getElementById("semaforo");
+  const pv=document.getElementById("painelVerif"); if(!pv) return;
   if(!EU){
-    sem.classList.remove("verde"); sem.style.background="";
-    sem.title="Escolha quem é (canto superior direito)";
-    av.className=""; av.style.display="block";
-    av.innerHTML=`⚠ Escolha primeiro <b>quem é</b> («Sou:», no canto superior direito) para usar a verificação.`;
+    if(sem){ sem.classList.remove("verde"); sem.title="Escolha quem é (canto superior direito)"; }
+    pv.className="pv"; pv.style.display="block";
+    pv.innerHTML=`<div class="pv-cab">⚠ Escolha primeiro <b>quem é</b> («Sou:», no canto superior direito) para ver o que falta verificar.</div>`;
     return;
   }
   const outroNome=outra(EU);
-  const dias=diasPainel();
-  const pend=dias.filter(d=>!assinou(EU,d));           // dias que EU ainda não assinei (ou ficaram desatualizados)
+  const pend=ordAnun(pendentesDe(EU));
+  const pendOutro=pendentesDe(outroNome).length;
   const verde=pend.length===0;
-  sem.classList.toggle("verde",verde);
-  sem.title=verde?"Verificou todos os dias recentes":`Faltam ${pend.length} dia(s) por verificar`;
+  if(sem){ sem.classList.toggle("verde",verde); sem.title=verde?"Nada por verificar da sua parte":`${pend.length} anúncio(s) por verificar`; }
 
-  const cel=(quem,d)=>{
-    if(assinou(quem,d)){ const v=VERIF.dias[d][quem]; return `<span class="v-ok" title="verificado em ${fmtDH(v.em)}">🟢 ${quem}</span>`; }
-    if(assinouAntes(quem,d)) return `<span class="v-stale" title="verificou, mas houve alterações depois">🟠 ${quem}</span>`;
-    return `<span class="v-no">⚪ ${quem}</span>`;
-  };
-  const linhas=dias.map(d=>{
-    const ambos=assinou("SAFSM",d)&&assinou("JMF",d);
-    const btnEu=assinou(EU,d)?``:`<button class="acao vbtn" data-vd="${d}">Verificar</button>`;
-    const btnFechar=ambos?`<button class="acao vbtn" data-fd="${d}" title="Arquiva o dia (fica na lista de fechados, pode reabrir)">✓ Fechar dia</button>`:``;
-    return `<div class="v-linha"><span class="v-dia">${dmy(d)}</span>${cel("SAFSM",d)}${cel("JMF",d)}${btnEu}${btnFechar}</div>`;
-  }).join("");
+  let cab;
+  if(verde){
+    cab=`🟢 <b>Nada por verificar da sua parte.</b> `+(pendOutro?`Faltam ${pendOutro} ao ${outroNome}.`:`Tudo verificado pelos dois.`);
+    pv.className="pv ok";
+  } else {
+    cab=`⚠ <b>${pend.length} anúncio(s) por verificar</b> (marcações/observações por confirmar). `+
+      `<button class="acao primario vbtn" data-vtudo="1">Verificar todos (${pend.length})</button>`;
+    pv.className="pv";
+  }
+  if(EMAIL_MSG) cab+=` <span class="v-email">· ${EMAIL_MSG}</span>`;
 
-  const fech=diasFechados();
+  const lista = pend.length ? `<div class="pv-lista">${pend.map(r=>linhaAnun(r,false)).join("")}</div>` : "";
+
+  const fech=anunFechados();
   let fechHtml="";
   if(fech.length){
-    fechHtml=`<div class="v-fech"><button class="v-fechtog" data-tog="1">${mostrarFechados?"▾":"▸"} Dias fechados (${fech.length})</button>`;
-    if(mostrarFechados){
-      fechHtml+=`<div class="v-grid" style="margin-top:5px">`+fech.map(d=>
-        `<div class="v-linha v-linha-f"><span class="v-dia">${dmy(d)}</span><span class="v-no">✓ fechado</span>`+
-        `<button class="acao vbtn" data-rb="${d}" title="Volta a pôr o dia no quadro">Reabrir</button>`+
-        `<button class="acao vbtn" data-fdef="${d}" title="Remove de vez — deixa de aparecer">Fechar de vez</button></div>`).join("")+`</div>`;
-    }
+    fechHtml=`<div class="v-fech"><button class="v-fechtog" data-tog="1">${mostrarFechadosV?"▾":"▸"} Anúncios fechados (${fech.length})</button>`;
+    if(mostrarFechadosV) fechHtml+=`<div class="pv-lista" style="margin-top:5px">${fech.map(r=>linhaAnun(r,true)).join("")}</div>`;
     fechHtml+=`</div>`;
   }
 
-  let topo;
-  if(verde){
-    const outroFaltam=dias.filter(d=>!assinou(outroNome,d));
-    topo = outroFaltam.length
-      ? `🟢 <b>Verificou todos os dias.</b> À espera da verificação de <b>${outroNome}</b> em: ${outroFaltam.map(dmy).join(", ")}.`
-      : `🟢 <b>Tudo verificado pelos dois.</b> Pode «Fechar dia» nos que já não precisa de ver.`;
-    av.className="ok";
-  } else {
-    const outroJa=pend.filter(d=>assinou(outroNome,d)).map(dmy);
-    topo = `⚠ <b>Tem dias por verificar:</b> ${pend.map(dmy).join(", ")}.`+
-      (outroJa.length?` <b>${outroNome}</b> já verificou: ${outroJa.join(", ")}.`:``)+
-      ` <button class="acao primario vbtn" data-vtudo="1">Verificar tudo</button>`;
-    av.className="";
-  }
-  if(EMAIL_MSG) topo+=` <span class="v-email">· ${EMAIL_MSG}</span>`;
-  av.style.display="block";
-  av.innerHTML=`<div class="v-topo">${topo}</div><div class="v-grid">${linhas}</div>${fechHtml}`;
-  av.querySelectorAll("[data-vd]").forEach(b=>b.onclick=()=>verificarDias([b.dataset.vd]));
-  av.querySelectorAll("[data-fd]").forEach(b=>b.onclick=()=>fecharDia(b.dataset.fd));
-  const vt=av.querySelector("[data-vtudo]"); if(vt) vt.onclick=()=>verificarDias(pend);
-  const tg=av.querySelector("[data-tog]"); if(tg) tg.onclick=()=>{ mostrarFechados=!mostrarFechados; renderVerif(); };
-  av.querySelectorAll("[data-rb]").forEach(b=>b.onclick=()=>reabrirDia(b.dataset.rb));
-  av.querySelectorAll("[data-fdef]").forEach(b=>b.onclick=()=>fecharDefinitivo(b.dataset.fdef));
+  pv.style.display="block";
+  pv.innerHTML=`<div class="pv-cab">${cab}</div>${lista}${fechHtml}`;
+  pv.querySelectorAll("[data-va]").forEach(b=>b.onclick=()=>{ const r=REGS.find(x=>String(x.n)===b.dataset.va); if(r) verificarAnuncios([r]); });
+  pv.querySelectorAll("[data-fa]").forEach(b=>b.onclick=()=>fecharAnuncio(b.dataset.fa));
+  pv.querySelectorAll("[data-rb]").forEach(b=>b.onclick=()=>reabrirAnuncio(b.dataset.rb));
+  pv.querySelectorAll("[data-fdef]").forEach(b=>b.onclick=()=>fecharAnunDefinitivo(b.dataset.fdef));
+  const vt=pv.querySelector("[data-vtudo]"); if(vt) vt.onclick=()=>verificarAnuncios(pend);
+  const tg=pv.querySelector("[data-tog]"); if(tg) tg.onclick=()=>{ mostrarFechadosV=!mostrarFechadosV; renderVerif(); };
 }
 
 /* ---------- ir buscar os dados ao mesmo servidor (dados.json.gz) ---------- */
@@ -498,7 +542,7 @@ function initEventos(){
   document.getElementById("btnAtualizar").onclick=atualizarDaNuvem;
   const eu=document.getElementById("euSel"); eu.value=EU;
   eu.onchange=e=>{ EU=e.target.value; try{localStorage.setItem("adr_eu",EU);}catch(_){}; renderVerif(); };
-  document.getElementById("semaforo").onclick=()=>{ if(!EU){exigeEu();return;} const pend=diasPainel().filter(d=>!assinou(EU,d)); if(pend.length) verificarDias(pend); };
+  document.getElementById("semaforo").onclick=()=>{ if(!EU){exigeEu();return;} const pend=pendentesDe(EU); if(pend.length) verificarAnuncios(pend); };
   document.getElementById("btnRecente").onclick=()=>{ const {max}=datasMinMax(); if(max) aplicarPeriodo(max,max); };
   document.getElementById("btnUltimos").onclick=()=>{ const {min,max}=datasMinMax(); if(!max) return; let n=parseInt(document.getElementById("fNdias").value)||7; let de=menosDias(max,n); if(min&&de<min)de=min; aplicarPeriodo(de,max); };
   document.getElementById("fNdias").onkeydown=e=>{ if(e.key==="Enter") document.getElementById("btnUltimos").click(); };
@@ -775,7 +819,7 @@ async function atualizarDaNuvem(){
   const maxAntes=datasMinMax().max;
   try{
     await carregarDados();
-    try{ await puxarMarc(); await lerVerif(); }catch(_){}   // traz também marcações e verificação feitas noutro computador
+    try{ await puxarMarc(); }catch(_){}   // traz também marcações + verificação (guardadas no mesmo sítio) de outro computador
     // se estava a ver até ao dia mais recente, avança o «até» para o novo dia mais recente (senão os novos ficavam escondidos)
     const maxDepois=datasMinMax().max;
     if(maxDepois && (F.ate||"")<maxDepois && (!F.ate || !maxAntes || F.ate>=maxAntes)){ F.ate=maxDepois; document.getElementById("vAte").value=maxDepois; }
@@ -794,12 +838,11 @@ async function atualizarDaNuvem(){
     document.getElementById("status").innerHTML=`<span style="color:#b02a2a">Erro a carregar os dados: ${esc(e.message)}. Tente recarregar a página.</span>`;
   }
   initFiltros(); definirDatasDefeito(); initEventos(); mostrarStatus(); render();
-  // puxar as marcações da nuvem (para aparecerem as feitas noutro computador) e semear as locais
+  // puxar as marcações+verificação da nuvem (feitas noutro computador) e semear as locais
   try{ if(await puxarMarc()){ render(); } agendarPush(); }catch(e){}
-  try{ await lerVerif(); renderVerif(); }catch(e){}
-  // recarrega em silêncio a cada 30 min (dados novos) e puxa marcações + verificação a cada 60s (sincronizar entre PCs)
+  // recarrega em silêncio a cada 30 min (dados novos) e puxa marcações+verificação a cada 60s (sincronizar entre PCs)
   setInterval(async()=>{ try{ const a=REGS.length; await carregarDados(); if(REGS.length!==a){ initFiltros(); mostrarStatus(); render(); } }catch(e){} }, 1800000);
-  setInterval(async()=>{ try{ const antes=JSON.stringify(MARC); if(await puxarMarc() && JSON.stringify(MARC)!==antes){ render(); } const av=JSON.stringify(VERIF); await lerVerif(); if(JSON.stringify(VERIF)!==av) renderVerif(); }catch(e){} }, 60000);
+  setInterval(async()=>{ try{ const antes=JSON.stringify(MARC); if(await puxarMarc() && JSON.stringify(MARC)!==antes){ render(); } }catch(e){} }, 60000);
 })();
 </script>
 </body>
