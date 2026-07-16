@@ -4,7 +4,7 @@
 # Fonte 2: Diário da República (site) via Playwright — dias mais recentes.
 import json, gzip, datetime, urllib.request, sys, os, re, asyncio
 
-VERSAO = "7.8"          # versão da app/dados (aparece na página)
+VERSAO = "7.9"          # versão da app/dados (aparece na página)
 DATASET_ID = "66d72fbc58cd7a63dae28712"
 JANELA_DIAS = 120
 KEEP = {"Anúncio de procedimento", "Anúncio de concurso urgente", "Anúncio de Alteração"}

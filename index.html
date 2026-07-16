@@ -233,13 +233,13 @@
   <div id="vazio" style="display:none">Sem resultados para o período/filtros/pesquisa actuais.</div>
 
   <p class="nota">
-    <b>Como usar:</b> clique no cabeçalho de um grupo para o minimizar/abrir; clique numa linha para ver toda a informação do anúncio e escrever observações; use o selector de cada linha para marcar «A analisar», «A concorrer» ou «Descartado». As marcações e observações ficam <b>guardadas na nuvem</b> e acompanham-no em qualquer computador. Os <b>contadores</b> por cima das tabelas mostram quantos anúncios estão em cada marcação — clique num contador para ver só esses. Ao marcar como <b>verificado</b> (semáforo), é enviado automaticamente um email à outra pessoa a avisar que tem coisas para ver. Ao abrir, a página mostra os <b>últimos 7 dias</b> (abre mais depressa); para ver mais atrás use os campos «Ver de/até» ou o botão «Todos». A página <b>atualiza-se sozinha todos os dias</b> — pode carregar em «↻ Atualizar» a qualquer momento para ver as novidades.<br>
+    <b>Como usar:</b> clique no cabeçalho de um grupo para o minimizar/abrir; clique numa linha para ver toda a informação do anúncio e escrever observações; use o selector de cada linha para marcar «A analisar», «A concorrer» ou «Descartado». As marcações e observações ficam <b>guardadas na nuvem</b> e acompanham-no em qualquer computador. Os <b>contadores</b> por cima das tabelas mostram quantos anúncios estão em cada marcação — clique num contador para ver só esses. Na <b>secção do topo</b> vê os anúncios com marcação/observação que ainda faltam verificar; ao carregar em «Verificar» abre um email pronto (para si e para o JMF) com a lista das alterações — basta carregar em «Enviar». Ao abrir, a página mostra os <b>últimos 7 dias</b> (abre mais depressa); para ver mais atrás use os campos «Ver de/até» ou o botão «Todos». A página <b>atualiza-se sozinha todos os dias</b> — pode carregar em «↻ Atualizar» a qualquer momento para ver as novidades.<br>
     <b>Fonte:</b> dados oficiais do Portal BASE / IMPIC (dados.gov.pt). O link «DR» de cada anúncio abre o PDF oficial no Diário da República.
   </p>
 </main>
 
 <script>
-const APP_VER="7.8";        // versão da aplicação (mostrada no canto superior direito)
+const APP_VER="7.9";        // versão da aplicação (mostrada no canto superior direito)
 let META={ver:"",gerado:"",hora:"",de:"",ate:"",janela:120,n:0};
 const CATS=["Obras","Serviços","Serviços de fiscalização","Serviços de projeto","Fornecimento de bens","Concessões","Alterações de procedimento","Outros"];
 const CLS={"Obras":"Obras","Serviços":"Servicos","Serviços de fiscalização":"Fiscalizacao","Serviços de projeto":"Projeto","Fornecimento de bens":"Fornecimento","Concessões":"Concessoes","Alterações de procedimento":"Alteracoes","Outros":"Outros"};
@@ -332,36 +332,28 @@ function descreveMudanca(prev, cur){
   if((prev.obs||"")!==(cur.obs||"")) ps.push('observação alterada: "'+(cur.obs||"").slice(0,160)+'"');
   return ps.join("; ");
 }
-/* email COM as alterações, enviado aos DOIS emails registados */
-async function enviarEmailMudancas(mudancas){
+/* Abre o programa de email (Mail/Outlook) com a mensagem já escrita PARA OS DOIS, com a lista
+   das alterações. O utilizador só carrega em «Enviar». Sem serviços externos nem ativações. */
+function abrirEmailMudancas(mudancas){
+  const to=PESSOAS.SAFSM+","+PESSOAS.JMF;
+  const assunto=`Anuncios DR - ${EU} verificou ${mudancas.length} com alteracao`;
   let corpo;
   if(!mudancas.length){
-    corpo=`${EU} verificou os anúncios. Não havia alterações novas desde a verificação anterior.\n\nApp: ${APP_URL}`;
+    corpo=`${EU} verificou os anúncios. Sem alterações novas desde a verificação anterior.\n\nApp: ${APP_URL}`;
   } else {
-    corpo=`${EU} verificou ${mudancas.length} anúncio(s) com alterações:\n\n`+
-      mudancas.map(({r,desc})=>`• ${dmy(r.data)} — ${r.ent}\n  ${(r.obj||"").slice(0,160)}\n  Alteração: ${desc}\n  DR: ${r.pdf||"-"}`).join("\n\n")+
-      `\n\nAbrir a app: ${APP_URL}`;
+    const cab=`${EU} verificou ${mudancas.length} anúncio(s) com alterações:\n\n`;
+    const linhas=mudancas.map(({r,desc})=>`- ${dmy(r.data)} | ${r.ent} — ${(r.obj||"").slice(0,110)}\n  ${desc}\n  ${r.pdf||""}`);
+    // limita o tamanho (o mailto tem limite prático de caracteres) — o resto vê-se na app
+    const MAX=1600; let usado=cab.length; const inc=[];
+    for(const l of linhas){ if(usado+l.length+2>MAX) break; inc.push(l); usado+=l.length+2; }
+    const cortados=mudancas.length-inc.length;
+    corpo=cab+inc.join("\n\n")+(cortados>0?`\n\n… e mais ${cortados} anúncio(s). Ver na app: ${APP_URL}`:`\n\nApp: ${APP_URL}`);
   }
-  const assunto=`Anúncios DR — ${EU} verificou ${mudancas.length} com alteração(ões)`;
-  const res={ok:false, ativacao:false};
-  for(const dest of [PESSOAS.SAFSM, PESSOAS.JMF]){
-    try{
-      const r=await fetch("https://formsubmit.co/ajax/"+dest,{method:"POST",
-        headers:{"Content-Type":"application/json","Accept":"application/json"},
-        body:JSON.stringify({name:"Anúncios Concursos DR", _subject:assunto, mensagem:corpo, _captcha:"false", _template:"box"})});
-      const j=await r.json().catch(()=>({}));
-      if(/activat/i.test(j.message||"")) res.ativacao=true;
-      else if(r.ok && String(j.success)!=="false") res.ok=true;
-    }catch(e){}
-  }
-  return res;
-}
-function avisoEmail(res){
-  if(res.ok && !res.ativacao) EMAIL_MSG="✉ Email enviado aos dois.";
-  else if(res.ativacao) EMAIL_MSG="✉ Falta ativar o FormSubmit num dos emails — clicar «Activate Form» no email recebido (ver spam).";
-  else EMAIL_MSG="⚠ Não foi possível enviar o email.";
+  const url=`mailto:${to}?subject=${encodeURIComponent(assunto)}&body=${encodeURIComponent(corpo)}`;
+  const a=document.createElement("a"); a.href=url; document.body.appendChild(a); a.click(); a.remove();
+  EMAIL_MSG="✉ Abri o email para os dois — carregue em «Enviar» no seu programa de email.";
   renderVerif();
-  clearTimeout(avisoEmail._t); avisoEmail._t=setTimeout(()=>{ EMAIL_MSG=""; renderVerif(); },9000);
+  clearTimeout(abrirEmailMudancas._t); abrirEmailMudancas._t=setTimeout(()=>{ EMAIL_MSG=""; renderVerif(); },9000);
 }
 function verificarAnuncios(regs){
   if(!exigeEu() || !regs.length) return;
@@ -376,7 +368,7 @@ function verificarAnuncios(regs){
     MARC[r.n].ver[EU]={...cur, em:agora};
   });
   guardarMarc(); agendarPush(); render();
-  enviarEmailMudancas(mudancas).then(avisoEmail);
+  abrirEmailMudancas(mudancas);
 }
 function fecharAnuncio(n){ if(!MARC[n])MARC[n]={}; MARC[n].fx=1; guardarMarc(); agendarPush(); render(); }
 function reabrirAnuncio(n){ if(MARC[n]){ MARC[n].fx=0; guardarMarc(); agendarPush(); render(); } }
