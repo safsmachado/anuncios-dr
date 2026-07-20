@@ -55,6 +55,8 @@
   .pill-concorrer{background:#e7f6ee;color:#186a3b}
   .pill-descartado{background:#eef0f4;color:#556}
   .pv .vbtn{padding:4px 10px;font-size:12px}
+  .vbtn-ap{border-color:#3aa06a !important;color:#186a3b !important}
+  .vbtn-ap:hover{background:#e7f6ee !important}
   .pv .v-ok,.pv .v-stale,.pv .v-no{font-size:12px}
   .pv .v-no{opacity:.6}
   /* botões mais pequenos no primeiro quadro */
@@ -220,6 +222,7 @@
     <div class="campo"><label>Marcação</label><div class="ms" id="msEstado"></div></div>
     <div class="campo"><label>Tipo de procedimento</label><div class="ms" id="msProc"></div></div>
     <div class="campo"><label>Lotes</label><div class="ms" id="msLotes"></div></div>
+    <div class="campo"><label>Distrito (local de execução)</label><div class="ms" id="msDist"></div></div>
     <div class="campo"><label>Crit. ambiental</label><div class="ms" id="msAmb"></div></div>
     <div class="campo"><label>Valor mín. €</label><input type="number" id="fVmin" min="0" step="1000" style="width:105px"></div>
     <div class="campo"><label>Valor máx. €</label><input type="number" id="fVmax" min="0" step="1000" style="width:105px"></div>
@@ -233,13 +236,13 @@
   <div id="vazio" style="display:none">Sem resultados para o período/filtros/pesquisa actuais.</div>
 
   <p class="nota">
-    <b>Como usar:</b> clique no cabeçalho de um grupo para o minimizar/abrir; clique numa linha para ver toda a informação do anúncio e escrever observações; use o selector de cada linha para marcar «A analisar», «A concorrer» ou «Descartado». As marcações e observações ficam <b>guardadas na nuvem</b> e acompanham-no em qualquer computador. Os <b>contadores</b> por cima das tabelas mostram quantos anúncios estão em cada marcação — clique num contador para ver só esses. Na <b>secção do topo</b> vê os anúncios com marcação/observação que ainda faltam verificar; ao carregar em «Verificar» abre um email pronto (para si e para o JMF) com a lista das alterações — basta carregar em «Enviar». Ao abrir, a página mostra os <b>últimos 7 dias</b> (abre mais depressa); para ver mais atrás use os campos «Ver de/até» ou o botão «Todos». A página <b>atualiza-se sozinha todos os dias</b> — pode carregar em «↻ Atualizar» a qualquer momento para ver as novidades.<br>
+    <b>Como usar:</b> clique no cabeçalho de um grupo para o minimizar/abrir; clique numa linha para ver toda a informação do anúncio e escrever observações; use o selector de cada linha para marcar «A analisar», «A concorrer» ou «Descartado». As marcações e observações ficam <b>guardadas na nuvem</b> e acompanham-no em qualquer computador. Os <b>contadores</b> por cima das tabelas mostram quantos anúncios estão em cada marcação — clique num contador para ver só esses. Na <b>secção do topo</b> vê os anúncios com marcação/observação que ainda faltam verificar. Em cada um pode carregar em «Verificar» (vi) ou «Aprovado» (aprovo a marcação): «Verificar» abre um email só com os anúncios que <b>mudaram</b>; «Aprovado» abre um email com a <b>aprovação</b> das marcações — em ambos, para si e para o JMF, basta carregar em «Enviar». Se depois alguém alterar a marcação, o anúncio volta a aparecer por verificar. Ao abrir, a página mostra os <b>últimos 7 dias</b> (abre mais depressa); para ver mais atrás use os campos «Ver de/até» ou o botão «Todos». A página <b>atualiza-se sozinha todos os dias</b> — pode carregar em «↻ Atualizar» a qualquer momento para ver as novidades.<br>
     <b>Fonte:</b> dados oficiais do Portal BASE / IMPIC (dados.gov.pt). O link «DR» de cada anúncio abre o PDF oficial no Diário da República.
   </p>
 </main>
 
 <script>
-const APP_VER="7.9";        // versão da aplicação (mostrada no canto superior direito)
+const APP_VER="8.1";        // versão da aplicação (mostrada no canto superior direito)
 let META={ver:"",gerado:"",hora:"",de:"",ate:"",janela:120,n:0};
 const CATS=["Obras","Serviços","Serviços de fiscalização","Serviços de projeto","Fornecimento de bens","Concessões","Alterações de procedimento","Outros"];
 const CLS={"Obras":"Obras","Serviços":"Servicos","Serviços de fiscalização":"Fiscalizacao","Serviços de projeto":"Projeto","Fornecimento de bens":"Fornecimento","Concessões":"Concessoes","Alterações de procedimento":"Alteracoes","Outros":"Outros"};
@@ -332,52 +335,68 @@ function descreveMudanca(prev, cur){
   if((prev.obs||"")!==(cur.obs||"")) ps.push('observação alterada: "'+(cur.obs||"").slice(0,160)+'"');
   return ps.join("; ");
 }
-/* Abre o programa de email (Mail/Outlook) com a mensagem já escrita PARA OS DOIS, com a lista
-   das alterações. O utilizador só carrega em «Enviar». Sem serviços externos nem ativações. */
-function abrirEmailMudancas(mudancas){
+/* Abre o programa de email (Mail/Outlook) já escrito PARA OS DOIS. Sem serviços externos nem ativações.
+   - VERIFICAR: o email leva SÓ os anúncios que tiveram alterações nas marcações.
+   - APROVADO: o email leva a indicação de aprovação das marcações (+ a alteração, se houver). */
+function abrirEmailAcao(itens, aprov){
   const to=PESSOAS.SAFSM+","+PESSOAS.JMF;
-  const assunto=`Anuncios DR - ${EU} verificou ${mudancas.length} com alteracao`;
-  let corpo;
-  if(!mudancas.length){
-    corpo=`${EU} verificou os anúncios. Sem alterações novas desde a verificação anterior.\n\nApp: ${APP_URL}`;
+  const mud=itens.filter(i=>i.mudou);
+  let assunto, cab, linhas;
+  if(aprov){
+    assunto=`Anuncios DR - ${EU} APROVOU ${itens.length} marcacao(oes)`;
+    cab=`${EU} aprovou as marcações de ${itens.length} anúncio(s):\n\n`;
+    linhas=itens.map(({r,desc})=>`- ${dmy(r.data)} | ${r.ent} — ${(r.obj||"").slice(0,110)}\n  APROVADO${desc?" — "+desc:" (marcação: "+nomeEstado(snapAtual(r.n).estado)+")"}\n  ${r.pdf||""}`);
+  } else if(mud.length){
+    assunto=`Anuncios DR - ${EU} verificou ${mud.length} com alteracao`;
+    cab=`${EU} verificou; anúncios com alterações nas marcações:\n\n`;
+    linhas=mud.map(({r,desc})=>`- ${dmy(r.data)} | ${r.ent} — ${(r.obj||"").slice(0,110)}\n  ${desc}\n  ${r.pdf||""}`);
   } else {
-    const cab=`${EU} verificou ${mudancas.length} anúncio(s) com alterações:\n\n`;
-    const linhas=mudancas.map(({r,desc})=>`- ${dmy(r.data)} | ${r.ent} — ${(r.obj||"").slice(0,110)}\n  ${desc}\n  ${r.pdf||""}`);
-    // limita o tamanho (o mailto tem limite prático de caracteres) — o resto vê-se na app
-    const MAX=1600; let usado=cab.length; const inc=[];
-    for(const l of linhas){ if(usado+l.length+2>MAX) break; inc.push(l); usado+=l.length+2; }
-    const cortados=mudancas.length-inc.length;
-    corpo=cab+inc.join("\n\n")+(cortados>0?`\n\n… e mais ${cortados} anúncio(s). Ver na app: ${APP_URL}`:`\n\nApp: ${APP_URL}`);
+    // verificar sem alterações → email curto
+    assunto=`Anuncios DR - ${EU} verificou (sem alteracoes)`;
+    const url0=`mailto:${to}?subject=${encodeURIComponent(assunto)}&body=${encodeURIComponent(`${EU} verificou os anúncios. Sem alterações nas marcações.\n\nApp: ${APP_URL}`)}`;
+    const a0=document.createElement("a"); a0.href=url0; document.body.appendChild(a0); a0.click(); a0.remove();
+    _emailAberto(); return;
   }
+  const MAX=1600; let usado=cab.length; const inc=[];
+  for(const l of linhas){ if(usado+l.length+2>MAX) break; inc.push(l); usado+=l.length+2; }
+  const cortados=linhas.length-inc.length;
+  const corpo=cab+inc.join("\n\n")+(cortados>0?`\n\n… e mais ${cortados} anúncio(s). Ver na app: ${APP_URL}`:`\n\nApp: ${APP_URL}`);
   const url=`mailto:${to}?subject=${encodeURIComponent(assunto)}&body=${encodeURIComponent(corpo)}`;
   const a=document.createElement("a"); a.href=url; document.body.appendChild(a); a.click(); a.remove();
+  _emailAberto();
+}
+function _emailAberto(){
   EMAIL_MSG="✉ Abri o email para os dois — carregue em «Enviar» no seu programa de email.";
   renderVerif();
-  clearTimeout(abrirEmailMudancas._t); abrirEmailMudancas._t=setTimeout(()=>{ EMAIL_MSG=""; renderVerif(); },9000);
+  clearTimeout(_emailAberto._t); _emailAberto._t=setTimeout(()=>{ EMAIL_MSG=""; renderVerif(); },9000);
 }
-function verificarAnuncios(regs){
+// aprov=false → «Verificar» (só vi); aprov=true → «Aprovado» (aprovo a marcação)
+function acaoAnuncios(regs, aprov){
   if(!exigeEu() || !regs.length) return;
   const agora=new Date().toISOString();
-  const mudancas=[];
+  const itens=[];
   regs.forEach(r=>{
     const cur=snapAtual(r.n);
     const desc=descreveMudanca(verOf(r.n)[EU], cur);   // o que mudou desde a MINHA última assinatura
-    if(desc) mudancas.push({r, desc});
+    itens.push({r, desc, mudou:!!desc});
     if(!MARC[r.n]) MARC[r.n]={};
     if(!MARC[r.n].ver) MARC[r.n].ver={};
-    MARC[r.n].ver[EU]={...cur, em:agora};
+    MARC[r.n].ver[EU]={...cur, em:agora, aprov:aprov?1:0};
   });
   guardarMarc(); agendarPush(); render();
-  abrirEmailMudancas(mudancas);
+  abrirEmailAcao(itens, aprov);
 }
+function verificarAnuncios(regs){ acaoAnuncios(regs, false); }
+function aprovarAnuncios(regs){ acaoAnuncios(regs, true); }
 function fecharAnuncio(n){ if(!MARC[n])MARC[n]={}; MARC[n].fx=1; guardarMarc(); agendarPush(); render(); }
 function reabrirAnuncio(n){ if(MARC[n]){ MARC[n].fx=0; guardarMarc(); agendarPush(); render(); } }
 function fecharAnunDefinitivo(n){ if(!confirm("Fechar este anúncio DE VEZ? Deixa de aparecer na verificação (mesmo nos fechados).")) return; if(!MARC[n])MARC[n]={}; MARC[n].fx=2; guardarMarc(); agendarPush(); render(); }
 
 function estBadge(e){ return e?`<span class="pill pill-${e}">${nomeEstado(e)}</span>`:`<span class="pill">sem marcação</span>`; }
 function vBadge(quem,n){
-  if(assinou(quem,n)) return `<span class="v-ok" title="verificado">🟢${quem}</span>`;
-  if(assinouAntes(quem,n)) return `<span class="v-stale" title="tinha verificado, mas houve alterações">🟠${quem}</span>`;
+  const v=verOf(n)[quem];
+  if(assinou(quem,n)) return v&&v.aprov ? `<span class="v-ok" title="aprovado">✅${quem}</span>` : `<span class="v-ok" title="verificado">🟢${quem}</span>`;
+  if(v) return `<span class="v-stale" title="tinha ${v.aprov?"aprovado":"verificado"}, mas houve alterações">🟠${quem}</span>`;
   return `<span class="v-no">⚪${quem}</span>`;
 }
 function linhaAnun(r, fechada){
@@ -386,7 +405,8 @@ function linhaAnun(r, fechada){
   const btns = fechada
     ? `<button class="acao vbtn" data-rb="${esc(r.n)}" title="Volta a pôr o anúncio na verificação">Reabrir</button>`+
       `<button class="acao vbtn" data-fdef="${esc(r.n)}" title="Remove de vez">Fechar de vez</button>`
-    : `${assinou(EU,r.n)?"":`<button class="acao vbtn" data-va="${esc(r.n)}">Verificar</button>`}`+
+    : (assinou(EU,r.n)?"":`<button class="acao vbtn" data-va="${esc(r.n)}" title="Vi/verifiquei este anúncio">Verificar</button>`+
+        `<button class="acao vbtn vbtn-ap" data-ap="${esc(r.n)}" title="Aprovo esta marcação">Aprovado</button>`)+
       `<button class="acao vbtn" data-fa="${esc(r.n)}" title="Arquiva este anúncio (sai da lista, pode reabrir)">Fechar</button>`;
   return `<div class="pv-linha${fechada?" v-linha-f":""}">`+
     `<span class="v-dia">${dmy(r.data)}</span>`+
@@ -417,7 +437,8 @@ function renderVerif(){
     pv.className="pv ok";
   } else {
     cab=`⚠ <b>${pend.length} anúncio(s) por verificar</b> (marcações/observações por confirmar). `+
-      `<button class="acao primario vbtn" data-vtudo="1">Verificar todos (${pend.length})</button>`;
+      `<button class="acao primario vbtn" data-vtudo="1">Verificar todos (${pend.length})</button> `+
+      `<button class="acao vbtn vbtn-ap" data-atudo="1">Aprovar todos (${pend.length})</button>`;
     pv.className="pv";
   }
   if(EMAIL_MSG) cab+=` <span class="v-email">· ${EMAIL_MSG}</span>`;
@@ -435,10 +456,12 @@ function renderVerif(){
   pv.style.display="block";
   pv.innerHTML=`<div class="pv-cab">${cab}</div>${lista}${fechHtml}`;
   pv.querySelectorAll("[data-va]").forEach(b=>b.onclick=()=>{ const r=REGS.find(x=>String(x.n)===b.dataset.va); if(r) verificarAnuncios([r]); });
+  pv.querySelectorAll("[data-ap]").forEach(b=>b.onclick=()=>{ const r=REGS.find(x=>String(x.n)===b.dataset.ap); if(r) aprovarAnuncios([r]); });
   pv.querySelectorAll("[data-fa]").forEach(b=>b.onclick=()=>fecharAnuncio(b.dataset.fa));
   pv.querySelectorAll("[data-rb]").forEach(b=>b.onclick=()=>reabrirAnuncio(b.dataset.rb));
   pv.querySelectorAll("[data-fdef]").forEach(b=>b.onclick=()=>fecharAnunDefinitivo(b.dataset.fdef));
   const vt=pv.querySelector("[data-vtudo]"); if(vt) vt.onclick=()=>verificarAnuncios(pend);
+  const at=pv.querySelector("[data-atudo]"); if(at) at.onclick=()=>aprovarAnuncios(pend);
   const tg=pv.querySelector("[data-tog]"); if(tg) tg.onclick=()=>{ mostrarFechadosV=!mostrarFechadosV; renderVerif(); };
 }
 
@@ -466,7 +489,7 @@ async function carregarDados(){
 }
 
 /* ---------- estado dos filtros/vista ---------- */
-const F={cat:[],estado:[],proc:[],lotes:[],amb:[],vmin:null,vmax:null,de:null,ate:null,pesq:""};
+const F={cat:[],estado:[],proc:[],lotes:[],amb:[],dist:[],vmin:null,vmax:null,de:null,ate:null,pesq:""};
 let ordCampo="data", ordDir=-1;
 const abertos={}, minimizados={};
 
@@ -507,6 +530,9 @@ function initFiltros(){
   const tp=[...new Set(REGS.map(r=>r.proc).filter(Boolean))].sort();
   criarMulti("msProc","Tipo de procedimento", tp.map(t=>({v:t,txt:t})), F.proc);
   criarMulti("msLotes","Lotes", [{v:"Sim",txt:"Com lotes"},{v:"Não",txt:"Sem lotes"}], F.lotes);
+  const dl=[...new Set(REGS.map(r=>r.dist).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pt"));
+  const semLoc=REGS.some(r=>!r.dist);
+  criarMulti("msDist","Distrito", dl.map(d=>({v:d,txt:d})).concat(semLoc?[{v:"__sem__",txt:"(sem local)"}]:[]), F.dist);
   criarMulti("msAmb","Crit. ambiental", [{v:"Sim",txt:"Sim"},{v:"Não",txt:"Não"}], F.amb);
 }
 // fechar menus ao clicar fora
@@ -544,7 +570,7 @@ function initEventos(){
   document.getElementById("fVmin").oninput=e=>{F.vmin=e.target.value?+e.target.value:null;rendLento();};
   document.getElementById("fVmax").oninput=e=>{F.vmax=e.target.value?+e.target.value:null;rendLento();};
   document.getElementById("btnLimpar").onclick=()=>{
-    F.cat.length=0; F.estado.length=0; F.proc.length=0; F.lotes.length=0; F.amb.length=0; F.vmin=null; F.vmax=null;
+    F.cat.length=0; F.estado.length=0; F.proc.length=0; F.lotes.length=0; F.amb.length=0; F.dist.length=0; F.vmin=null; F.vmax=null;
     document.getElementById("fVmin").value=""; document.getElementById("fVmax").value="";
     initFiltros(); render();
   };
@@ -569,6 +595,7 @@ function filtrados(ignorarEstado){
     if(F.proc.length && !F.proc.includes(r.proc)) return false;
     if(F.lotes.length){ const tem=Array.isArray(r.lotes)&&r.lotes.length>0; const q=tem?"Sim":"Não"; if(!F.lotes.includes(q))return false; }
     if(F.amb.length && !F.amb.includes(r.amb||"")) return false;
+    if(F.dist.length){ const d=r.dist||""; const ok = d?F.dist.includes(d):F.dist.includes("__sem__"); if(!ok) return false; }
     if(F.vmin!=null && !(r.preco>=F.vmin)) return false;
     if(F.vmax!=null && !(r.preco<=F.vmax)) return false;
     const a=anot(r.n);
@@ -581,7 +608,7 @@ function filtrados(ignorarEstado){
       if(!ok) return false;
     }
     if(termos.length){
-      const blob=[r.n,r.ent,r.obj,r.nif,r.proc,(r.cpv||[]).join(" "),(r.lotes||[]).join(" "),a.obs].join(" ").toLowerCase();
+      const blob=[r.n,r.ent,r.obj,r.nif,r.proc,r.local,r.dist,(r.cpv||[]).join(" "),(r.lotes||[]).join(" "),a.obs].join(" ").toLowerCase();
       if(!termos.every(t=>blob.includes(t))) return false;
     }
     return true;
@@ -723,6 +750,7 @@ function toggleDetalhe(tr,r){
     <div><b>Prazo p/ propostas</b>${r.prazo?esc(r.prazo)+" dias":"—"}</div>
     <div><b>Data limite de propostas</b>${dmy(r.dlim)}</div>
     <div><b>Critério ambiental</b>${esc(r.amb||"—")}</div>
+    <div><b>Local de execução</b>${r.dist?esc((r.local?r.local+" · ":"")+r.dist):"—"}</div>
     <div><b>NIPC entidade</b>${esc(r.nif||"—")}</div>
     <div class="full"><b>Entidade</b>${esc(r.ent)}</div>
     <div class="full"><b>Objeto</b>${esc(r.obj||"—")}</div>
@@ -748,10 +776,10 @@ function linhasParaExportar(){
   return ordenar(arr);
 }
 function tabelaExport(arr){
-  const cab=["Data","Categoria","Entidade","NIPC","Objeto","Procedimento","Preço base (€)","Prazo (dias)","Data limite","CPV","Plataforma","Marcação","Declaração enviada","Observações","Link DR"];
+  const cab=["Data","Categoria","Local de execução","Distrito","Entidade","NIPC","Objeto","Procedimento","Preço base (€)","Prazo (dias)","Data limite","CPV","Plataforma","Marcação","Declaração enviada","Observações","Link DR"];
   const est={analisar:"A analisar",concorrer:"A concorrer",descartado:"Descartado","":""};
   const linhas=arr.map(r=>{ const a=anot(r.n); return [
-    dmy(r.data), r.cat, r.ent, r.nif||"", r.obj||"", r.proc||"", (r.preco!=null?r.preco:""),
+    dmy(r.data), r.cat, r.local||"", r.dist||"", r.ent, r.nif||"", r.obj||"", r.proc||"", (r.preco!=null?r.preco:""),
     r.prazo||"", dmy(r.dlim), (r.cpv||[]).join("; "), r.plat||"", est[a.estado]||"", (a.decl?"Sim":""), a.obs||"", r.pdf||""
   ];});
   return {cab,linhas};
@@ -761,7 +789,7 @@ function exportarExcel(){
   if(!arr.length){ alert("Sem anúncios para exportar."); return; }
   const {cab,linhas}=tabelaExport(arr);
   const ws=XLSX.utils.aoa_to_sheet([cab,...linhas]);
-  ws["!cols"]=cab.map((c,i)=>({wch:[11,16,34,12,44,20,14,10,12,26,30,13,30,40][i]||16}));
+  ws["!cols"]=cab.map((c,i)=>({wch:[11,18,16,14,34,12,44,20,14,10,12,26,30,13,12,34,40][i]||16}));
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,"Anúncios");
   XLSX.writeFile(wb,`anuncios-dr-${(F.de||"")}_a_${(F.ate||"")}.xlsx`);
@@ -773,16 +801,16 @@ function exportarPdf(){
   const doc=new jsPDF({orientation:"landscape",unit:"pt",format:"a4"});
   const est={analisar:"Analisar",concorrer:"Concorrer",descartado:"Descartado","":""};
   const body=arr.map(r=>{ const a=anot(r.n); return [
-    dmy(r.data), r.cat, r.ent, (r.obj||"").slice(0,90), r.proc||"", eur(r.preco), dmy(r.dlim), est[a.estado]||""
+    dmy(r.data), r.cat, r.dist||"", r.ent, (r.obj||"").slice(0,90), r.proc||"", eur(r.preco), dmy(r.dlim), est[a.estado]||""
   ];});
   doc.setFontSize(13); doc.text("Anúncios Concursos DR",40,34);
   doc.setFontSize(9); doc.setTextColor(120);
   doc.text(`Período ${dmy(F.de)} a ${dmy(F.ate)} · ${arr.length} anúncios · fonte: Portal BASE/IMPIC`,40,50);
   doc.autoTable({
-    startY:60, head:[["Data","Categoria","Entidade","Objeto","Procedimento","Preço base","Data limite","Marcação"]],
+    startY:60, head:[["Data","Categoria","Distrito","Entidade","Objeto","Procedimento","Preço base","Data limite","Marcação"]],
     body, styles:{fontSize:7.5,cellPadding:3,overflow:"linebreak"},
     headStyles:{fillColor:[15,76,129]},
-    columnStyles:{2:{cellWidth:120},3:{cellWidth:200},5:{halign:"right"}}
+    columnStyles:{3:{cellWidth:110},4:{cellWidth:180},6:{halign:"right"}}
   });
   doc.save(`anuncios-dr-${(F.de||"")}_a_${(F.ate||"")}.pdf`);
 }
