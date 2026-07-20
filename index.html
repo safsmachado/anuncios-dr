@@ -57,6 +57,10 @@
   .pv .vbtn{padding:4px 10px;font-size:12px}
   .vbtn-ap{border-color:#3aa06a !important;color:#186a3b !important}
   .vbtn-ap:hover{background:#e7f6ee !important}
+  .pv-feitos{margin-top:10px;border-top:1px dashed var(--line);padding-top:8px}
+  .pv-feitos-cab{margin-bottom:6px}
+  .pv-chk input{width:16px;height:16px;cursor:pointer}
+  .pv-chk{display:flex;align-items:center}
   .pv .v-ok,.pv .v-stale,.pv .v-no{font-size:12px}
   .pv .v-no{opacity:.6}
   /* botões mais pequenos no primeiro quadro */
@@ -236,13 +240,13 @@
   <div id="vazio" style="display:none">Sem resultados para o período/filtros/pesquisa actuais.</div>
 
   <p class="nota">
-    <b>Como usar:</b> clique no cabeçalho de um grupo para o minimizar/abrir; clique numa linha para ver toda a informação do anúncio e escrever observações; use o selector de cada linha para marcar «A analisar», «A concorrer» ou «Descartado». As marcações e observações ficam <b>guardadas na nuvem</b> e acompanham-no em qualquer computador. Os <b>contadores</b> por cima das tabelas mostram quantos anúncios estão em cada marcação — clique num contador para ver só esses. Na <b>secção do topo</b> vê os anúncios com marcação/observação que ainda faltam verificar. Em cada um pode carregar em «Verificar» (vi) ou «Aprovado» (aprovo a marcação): «Verificar» abre um email só com os anúncios que <b>mudaram</b>; «Aprovado» abre um email com a <b>aprovação</b> das marcações — em ambos, para si e para o JMF, basta carregar em «Enviar». Se depois alguém alterar a marcação, o anúncio volta a aparecer por verificar. Ao abrir, a página mostra os <b>últimos 7 dias</b> (abre mais depressa); para ver mais atrás use os campos «Ver de/até» ou o botão «Todos». A página <b>atualiza-se sozinha todos os dias</b> — pode carregar em «↻ Atualizar» a qualquer momento para ver as novidades.<br>
+    <b>Como usar:</b> clique no cabeçalho de um grupo para o minimizar/abrir; clique numa linha para ver toda a informação do anúncio e escrever observações; use o selector de cada linha para marcar «A analisar», «A concorrer» ou «Descartado». As marcações e observações ficam <b>guardadas na nuvem</b> e acompanham-no em qualquer computador. Os <b>contadores</b> por cima das tabelas mostram quantos anúncios estão em cada marcação — clique num contador para ver só esses. Na <b>secção do topo</b> vê os anúncios com marcação/observação que ainda faltam verificar. Em cada um carregue em «Verificar» (vi) ou «Aprovado» (aprovo a marcação) — passam para a lista <b>«Verificados/aprovados por si»</b>. Aí <b>escolha com as caixas</b> quais quer no email e carregue em «✉ Enviar email dos selecionados» — abre a mensagem pronta para si e para o JMF, basta «Enviar». Se depois alguém alterar a marcação, o anúncio volta a aparecer por verificar. Ao abrir, a página mostra os <b>últimos 7 dias</b> (abre mais depressa); para ver mais atrás use os campos «Ver de/até» ou o botão «Todos». A página <b>atualiza-se sozinha todos os dias</b> — pode carregar em «↻ Atualizar» a qualquer momento para ver as novidades.<br>
     <b>Fonte:</b> dados oficiais do Portal BASE / IMPIC (dados.gov.pt). O link «DR» de cada anúncio abre o PDF oficial no Diário da República.
   </p>
 </main>
 
 <script>
-const APP_VER="8.1";        // versão da aplicação (mostrada no canto superior direito)
+const APP_VER="8.2";        // versão da aplicação (mostrada no canto superior direito)
 let META={ver:"",gerado:"",hora:"",de:"",ate:"",janela:120,n:0};
 const CATS=["Obras","Serviços","Serviços de fiscalização","Serviços de projeto","Fornecimento de bens","Concessões","Alterações de procedimento","Outros"];
 const CLS={"Obras":"Obras","Serviços":"Servicos","Serviços de fiscalização":"Fiscalizacao","Serviços de projeto":"Projeto","Fornecimento de bens":"Fornecimento","Concessões":"Concessoes","Alterações de procedimento":"Alteracoes","Outros":"Outros"};
@@ -335,59 +339,48 @@ function descreveMudanca(prev, cur){
   if((prev.obs||"")!==(cur.obs||"")) ps.push('observação alterada: "'+(cur.obs||"").slice(0,160)+'"');
   return ps.join("; ");
 }
-/* Abre o programa de email (Mail/Outlook) já escrito PARA OS DOIS. Sem serviços externos nem ativações.
-   - VERIFICAR: o email leva SÓ os anúncios que tiveram alterações nas marcações.
-   - APROVADO: o email leva a indicação de aprovação das marcações (+ a alteração, se houver). */
-function abrirEmailAcao(itens, aprov){
-  const to=PESSOAS.SAFSM+","+PESSOAS.JMF;
-  const mud=itens.filter(i=>i.mudou);
-  let assunto, cab, linhas;
-  if(aprov){
-    assunto=`Anuncios DR - ${EU} APROVOU ${itens.length} marcacao(oes)`;
-    cab=`${EU} aprovou as marcações de ${itens.length} anúncio(s):\n\n`;
-    linhas=itens.map(({r,desc})=>`- ${dmy(r.data)} | ${r.ent} — ${(r.obj||"").slice(0,110)}\n  APROVADO${desc?" — "+desc:" (marcação: "+nomeEstado(snapAtual(r.n).estado)+")"}\n  ${r.pdf||""}`);
-  } else if(mud.length){
-    assunto=`Anuncios DR - ${EU} verificou ${mud.length} com alteracao`;
-    cab=`${EU} verificou; anúncios com alterações nas marcações:\n\n`;
-    linhas=mud.map(({r,desc})=>`- ${dmy(r.data)} | ${r.ent} — ${(r.obj||"").slice(0,110)}\n  ${desc}\n  ${r.pdf||""}`);
-  } else {
-    // verificar sem alterações → email curto
-    assunto=`Anuncios DR - ${EU} verificou (sem alteracoes)`;
-    const url0=`mailto:${to}?subject=${encodeURIComponent(assunto)}&body=${encodeURIComponent(`${EU} verificou os anúncios. Sem alterações nas marcações.\n\nApp: ${APP_URL}`)}`;
-    const a0=document.createElement("a"); a0.href=url0; document.body.appendChild(a0); a0.click(); a0.remove();
-    _emailAberto(); return;
-  }
-  const MAX=1600; let usado=cab.length; const inc=[];
-  for(const l of linhas){ if(usado+l.length+2>MAX) break; inc.push(l); usado+=l.length+2; }
-  const cortados=linhas.length-inc.length;
-  const corpo=cab+inc.join("\n\n")+(cortados>0?`\n\n… e mais ${cortados} anúncio(s). Ver na app: ${APP_URL}`:`\n\nApp: ${APP_URL}`);
-  const url=`mailto:${to}?subject=${encodeURIComponent(assunto)}&body=${encodeURIComponent(corpo)}`;
-  const a=document.createElement("a"); a.href=url; document.body.appendChild(a); a.click(); a.remove();
-  _emailAberto();
-}
 function _emailAberto(){
   EMAIL_MSG="✉ Abri o email para os dois — carregue em «Enviar» no seu programa de email.";
   renderVerif();
   clearTimeout(_emailAberto._t); _emailAberto._t=setTimeout(()=>{ EMAIL_MSG=""; renderVerif(); },9000);
 }
-// aprov=false → «Verificar» (só vi); aprov=true → «Aprovado» (aprovo a marcação)
+// anúncios verificados/aprovados por mim (marcados, não fechados, já assinados por mim)
+function feitosDe(quem){ return ordAnun(anunMarcados().filter(r=>assinou(quem,r.n))); }
+let SELV=new Set();   // anúncios (feitos) selecionados para irem no email
+// aprov=false → «Verificar» (só vi); aprov=true → «Aprovado» (aprovo a marcação). NÃO envia email — só assina.
 function acaoAnuncios(regs, aprov){
   if(!exigeEu() || !regs.length) return;
   const agora=new Date().toISOString();
-  const itens=[];
   regs.forEach(r=>{
     const cur=snapAtual(r.n);
-    const desc=descreveMudanca(verOf(r.n)[EU], cur);   // o que mudou desde a MINHA última assinatura
-    itens.push({r, desc, mudou:!!desc});
     if(!MARC[r.n]) MARC[r.n]={};
     if(!MARC[r.n].ver) MARC[r.n].ver={};
     MARC[r.n].ver[EU]={...cur, em:agora, aprov:aprov?1:0};
+    SELV.add(String(r.n));   // fica selecionado para o email por defeito
   });
   guardarMarc(); agendarPush(); render();
-  abrirEmailAcao(itens, aprov);
 }
 function verificarAnuncios(regs){ acaoAnuncios(regs, false); }
 function aprovarAnuncios(regs){ acaoAnuncios(regs, true); }
+function anularAnuncio(n){ if(MARC[n]&&MARC[n].ver){ delete MARC[n].ver[EU]; SELV.delete(String(n)); guardarMarc(); agendarPush(); render(); } }
+/* Envia por email (mailto, aos dois) APENAS os anúncios verificados/aprovados que estão selecionados. */
+function enviarSelecionados(){
+  if(!exigeEu()) return;
+  const sel=feitosDe(EU).filter(r=>SELV.has(String(r.n)));
+  if(!sel.length){ alert("Selecione pelo menos um anúncio verificado/aprovado (caixa à esquerda) para incluir no email."); return; }
+  const to=PESSOAS.SAFSM+","+PESSOAS.JMF;
+  const cab=`${EU} — ${sel.length} anúncio(s) verificados/aprovados:\n\n`;
+  const linhas=sel.map(r=>{ const v=verOf(r.n)[EU]; const tag=v&&v.aprov?"APROVADO":"VERIFICADO";
+    return `- ${dmy(r.data)} | ${r.ent} — ${(r.obj||"").slice(0,110)}\n  ${tag}: ${nomeEstado(snapAtual(r.n).estado)}\n  ${r.pdf||""}`; });
+  const MAX=1600; let usado=cab.length; const inc=[];
+  for(const l of linhas){ if(usado+l.length+2>MAX) break; inc.push(l); usado+=l.length+2; }
+  const cortados=linhas.length-inc.length;
+  const corpo=cab+inc.join("\n\n")+(cortados>0?`\n\n… e mais ${cortados} anúncio(s). Ver na app: ${APP_URL}`:`\n\nApp: ${APP_URL}`);
+  const assunto=`Anuncios DR - ${EU} enviou ${sel.length} verificados/aprovados`;
+  const url=`mailto:${to}?subject=${encodeURIComponent(assunto)}&body=${encodeURIComponent(corpo)}`;
+  const a=document.createElement("a"); a.href=url; document.body.appendChild(a); a.click(); a.remove();
+  _emailAberto();
+}
 function fecharAnuncio(n){ if(!MARC[n])MARC[n]={}; MARC[n].fx=1; guardarMarc(); agendarPush(); render(); }
 function reabrirAnuncio(n){ if(MARC[n]){ MARC[n].fx=0; guardarMarc(); agendarPush(); render(); } }
 function fecharAnunDefinitivo(n){ if(!confirm("Fechar este anúncio DE VEZ? Deixa de aparecer na verificação (mesmo nos fechados).")) return; if(!MARC[n])MARC[n]={}; MARC[n].fx=2; guardarMarc(); agendarPush(); render(); }
@@ -415,6 +408,23 @@ function linhaAnun(r, fechada){
     `<span class="pv-badges">${vBadge("SAFSM",r.n)}${vBadge("JMF",r.n)}</span>`+
     `${r.pdf?`<a class="dr" href="${esc(r.pdf)}" target="_blank" rel="noopener">DR ↗</a>`:""}`+
     btns+`</div>`;
+}
+// linha de um anúncio JÁ verificado/aprovado por mim, com caixa de seleção para o email
+function linhaFeito(r){
+  const a=anot(r.n);
+  const v=verOf(r.n)[EU];
+  const tag=v&&v.aprov?`<span class="v-ok" title="aprovado por si">✅ Aprovado</span>`:`<span class="v-ok" title="verificado por si">🟢 Verificado</span>`;
+  const marcas=`${a.decl?" 📨":""}${a.obs&&a.obs.trim()?" ✏️":""}`;
+  return `<div class="pv-linha">`+
+    `<label class="pv-chk"><input type="checkbox" data-sel="${esc(r.n)}" ${SELV.has(String(r.n))?"checked":""}></label>`+
+    `<span class="v-dia">${dmy(r.data)}</span>`+
+    `<span class="pv-ent"><b>${esc(r.ent)}</b><span class="pv-obj">${esc((r.obj||"").slice(0,120))}</span></span>`+
+    `<span class="pv-est">${estBadge(a.estado)}${marcas}</span>`+
+    `<span class="pv-badges">${tag} · ${vBadge("JMF"===EU?"SAFSM":"JMF",r.n)}</span>`+
+    `${r.pdf?`<a class="dr" href="${esc(r.pdf)}" target="_blank" rel="noopener">DR ↗</a>`:""}`+
+    `<button class="acao vbtn" data-an="${esc(r.n)}" title="Anular a minha verificação (volta a por verificar)">Anular</button>`+
+    `<button class="acao vbtn" data-fa="${esc(r.n)}" title="Arquiva este anúncio">Fechar</button>`+
+    `</div>`;
 }
 function renderVerif(){
   const sem=document.getElementById("semaforo");
@@ -445,6 +455,19 @@ function renderVerif(){
 
   const lista = pend.length ? `<div class="pv-lista">${pend.map(r=>linhaAnun(r,false)).join("")}</div>` : "";
 
+  // secção «verificados/aprovados por mim» com caixas de seleção + botão de email
+  const feitos=feitosDe(EU);
+  const nSel=feitos.filter(r=>SELV.has(String(r.n))).length;
+  let feitosHtml="";
+  if(feitos.length){
+    feitosHtml=`<div class="pv-feitos"><div class="pv-feitos-cab">`+
+      `<b>Verificados / aprovados por si (${feitos.length})</b> — escolha os que quer no email: `+
+      `<button class="acao vbtn" data-seltodos="1">Selecionar todos</button> `+
+      `<button class="acao vbtn" data-selnenhum="1">Nenhum</button> `+
+      `<button class="acao primario vbtn" data-enviar="1">✉ Enviar email dos selecionados (${nSel})</button>`+
+      `</div><div class="pv-lista">${feitos.map(r=>linhaFeito(r)).join("")}</div></div>`;
+  }
+
   const fech=anunFechados();
   let fechHtml="";
   if(fech.length){
@@ -454,14 +477,19 @@ function renderVerif(){
   }
 
   pv.style.display="block";
-  pv.innerHTML=`<div class="pv-cab">${cab}</div>${lista}${fechHtml}`;
+  pv.innerHTML=`<div class="pv-cab">${cab}</div>${lista}${feitosHtml}${fechHtml}`;
   pv.querySelectorAll("[data-va]").forEach(b=>b.onclick=()=>{ const r=REGS.find(x=>String(x.n)===b.dataset.va); if(r) verificarAnuncios([r]); });
   pv.querySelectorAll("[data-ap]").forEach(b=>b.onclick=()=>{ const r=REGS.find(x=>String(x.n)===b.dataset.ap); if(r) aprovarAnuncios([r]); });
   pv.querySelectorAll("[data-fa]").forEach(b=>b.onclick=()=>fecharAnuncio(b.dataset.fa));
+  pv.querySelectorAll("[data-an]").forEach(b=>b.onclick=()=>anularAnuncio(b.dataset.an));
   pv.querySelectorAll("[data-rb]").forEach(b=>b.onclick=()=>reabrirAnuncio(b.dataset.rb));
   pv.querySelectorAll("[data-fdef]").forEach(b=>b.onclick=()=>fecharAnunDefinitivo(b.dataset.fdef));
+  pv.querySelectorAll("[data-sel]").forEach(c=>c.onchange=()=>{ const n=String(c.dataset.sel); if(c.checked)SELV.add(n); else SELV.delete(n); const b=pv.querySelector("[data-enviar]"); if(b) b.textContent=`✉ Enviar email dos selecionados (${feitosDe(EU).filter(r=>SELV.has(String(r.n))).length})`; });
   const vt=pv.querySelector("[data-vtudo]"); if(vt) vt.onclick=()=>verificarAnuncios(pend);
   const at=pv.querySelector("[data-atudo]"); if(at) at.onclick=()=>aprovarAnuncios(pend);
+  const st=pv.querySelector("[data-seltodos]"); if(st) st.onclick=()=>{ feitos.forEach(r=>SELV.add(String(r.n))); renderVerif(); };
+  const sn=pv.querySelector("[data-selnenhum]"); if(sn) sn.onclick=()=>{ feitos.forEach(r=>SELV.delete(String(r.n))); renderVerif(); };
+  const en=pv.querySelector("[data-enviar]"); if(en) en.onclick=enviarSelecionados;
   const tg=pv.querySelector("[data-tog]"); if(tg) tg.onclick=()=>{ mostrarFechadosV=!mostrarFechadosV; renderVerif(); };
 }
 
