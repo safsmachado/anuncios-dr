@@ -249,7 +249,7 @@
 </main>
 
 <script>
-const APP_VER="8.3";        // versão da aplicação (mostrada no canto superior direito)
+const APP_VER="8.4";        // versão da aplicação (mostrada no canto superior direito)
 let META={ver:"",gerado:"",hora:"",de:"",ate:"",janela:120,n:0};
 const CATS=["Obras","Serviços","Serviços de fiscalização","Serviços de projeto","Fornecimento de bens","Concessões","Alterações de procedimento","Outros"];
 const CLS={"Obras":"Obras","Serviços":"Servicos","Serviços de fiscalização":"Fiscalizacao","Serviços de projeto":"Projeto","Fornecimento de bens":"Fornecimento","Concessões":"Concessoes","Alterações de procedimento":"Alteracoes","Outros":"Outros"};
@@ -347,44 +347,42 @@ function _emailAberto(){
   renderVerif();
   clearTimeout(_emailAberto._t); _emailAberto._t=setTimeout(()=>{ EMAIL_MSG=""; renderVerif(); },9000);
 }
-// listas por pessoa: verificados (assinados sem aprovar) e aprovados (assinados e aprovados)
-function verificadosDe(quem){ return ordAnun(anunMarcados().filter(r=>{ const v=verOf(r.n)[quem]; return assinou(quem,r.n)&&!(v&&v.aprov); })); }
-function aprovadosDe(quem){ return ordAnun(anunMarcados().filter(r=>{ const v=verOf(r.n)[quem]; return assinou(quem,r.n)&&v&&v.aprov; })); }
+// verificados OU aprovados por mim → quadro de seleção para email
+function feitosDe(quem){ return ordAnun(anunMarcados().filter(r=>assinou(quem,r.n))); }
+let SELV=new Set();          // seleção (caixas) no quadro de email
 let SELP=new Set();          // seleção (caixas) na lista «por verificar»
-let mostrarAprovadosV=false; // secção «aprovados por si» recolhida por defeito
-/* Verificar/Aprovar: assina E abre logo o email (aos dois) com esses anúncios.
-   Aprovar assina com aprov=1 → o anúncio sai da lista de trabalho para «Aprovados por si». */
+/* Verificar/Aprovar: SÓ assina e mete o anúncio no quadro de seleção de email (NÃO envia já).
+   O email só sai depois, pelo botão «Enviar email dos selecionados». */
 function acaoAnuncios(regs, aprov){
   if(!exigeEu() || !regs.length) return;
   const agora=new Date().toISOString();
-  const itens=[];
   regs.forEach(r=>{
     const cur=snapAtual(r.n);
-    const desc=descreveMudanca(verOf(r.n)[EU], cur);
-    itens.push({r, desc});
     if(!MARC[r.n]) MARC[r.n]={};
     if(!MARC[r.n].ver) MARC[r.n].ver={};
     MARC[r.n].ver[EU]={...cur, em:agora, aprov:aprov?1:0};
     SELP.delete(String(r.n));
+    SELV.add(String(r.n));   // entra selecionado no quadro de email
   });
   guardarMarc(); agendarPush(); render();
-  abrirEmailAcao(itens, aprov);
 }
 function verificarAnuncios(regs){ acaoAnuncios(regs, false); }
 function aprovarAnuncios(regs){ acaoAnuncios(regs, true); }
-function anularAnuncio(n){ if(MARC[n]&&MARC[n].ver){ delete MARC[n].ver[EU]; guardarMarc(); agendarPush(); render(); } }
-/* email (mailto) ao OUTRO + a si, com os anúncios que acabou de verificar/aprovar */
-function abrirEmailAcao(itens, aprov){
-  if(!itens.length) return;
+function anularAnuncio(n){ if(MARC[n]&&MARC[n].ver){ delete MARC[n].ver[EU]; SELV.delete(String(n)); guardarMarc(); agendarPush(); render(); } }
+/* email (mailto) ao OUTRO + a si, SÓ com os anúncios verificados/aprovados que estão selecionados */
+function enviarSelecionados(){
+  if(!exigeEu()) return;
+  const sel=feitosDe(EU).filter(r=>SELV.has(String(r.n)));
+  if(!sel.length){ alert("Marque as caixas dos anúncios (verificados/aprovados) que quer incluir no email."); return; }
   const to=PESSOAS[outra(EU)]+","+PESSOAS[EU];
-  const tag=aprov?"APROVADO":"VERIFICADO";
-  const cab=`${EU} ${aprov?"aprovou":"verificou"} ${itens.length} anúncio(s):\n\n`;
-  const linhas=itens.map(({r,desc})=>`- ${dmy(r.data)} | ${r.ent} — ${(r.obj||"").slice(0,110)}\n  ${tag}: ${nomeEstado(snapAtual(r.n).estado)}${desc?" — "+desc:""}\n  ${r.pdf||""}`);
+  const cab=`${EU} — ${sel.length} anúncio(s) verificados/aprovados:\n\n`;
+  const linhas=sel.map(r=>{ const v=verOf(r.n)[EU]; const tag=v&&v.aprov?"APROVADO":"VERIFICADO";
+    return `- ${dmy(r.data)} | ${r.ent} — ${(r.obj||"").slice(0,110)}\n  ${tag}: ${nomeEstado(snapAtual(r.n).estado)}\n  ${r.pdf||""}`; });
   const MAX=1600; let usado=cab.length; const inc=[];
   for(const l of linhas){ if(usado+l.length+2>MAX) break; inc.push(l); usado+=l.length+2; }
   const cortados=linhas.length-inc.length;
   const corpo=cab+inc.join("\n\n")+(cortados>0?`\n\n… e mais ${cortados} anúncio(s). Ver na app: ${APP_URL}`:`\n\nApp: ${APP_URL}`);
-  const assunto=`Anuncios DR - ${EU} ${aprov?"APROVOU":"verificou"} ${itens.length}`;
+  const assunto=`Anuncios DR - ${EU} enviou ${sel.length} verificados/aprovados`;
   const url=`mailto:${to}?subject=${encodeURIComponent(assunto)}&body=${encodeURIComponent(corpo)}`;
   const a=document.createElement("a"); a.href=url; document.body.appendChild(a); a.click(); a.remove();
   _emailAberto();
@@ -400,24 +398,22 @@ function vBadge(quem,n){
   if(v) return `<span class="v-stale" title="tinha ${v.aprov?"aprovado":"verificado"}, mas houve alterações">🟠${quem}</span>`;
   return `<span class="v-no">⚪${quem}</span>`;
 }
-// modo: "pend" | "verif" | "aprov" | "fech"
+// modo: "pend" | "feito" | "fech"
 function linhaPV(r, modo){
   const a=anot(r.n);
   const marcas=`${a.decl?" 📨":""}${a.obs&&a.obs.trim()?" ✏️":""}`;
   let chk="", btns="", esq="";
   if(modo==="pend"){
     chk=`<label class="pv-chk"><input type="checkbox" data-p="${esc(r.n)}" ${SELP.has(String(r.n))?"checked":""}></label>`;
-    btns=`<button class="acao vbtn" data-va="${esc(r.n)}" title="Vi/verifiquei — envia email ao outro">Verificar</button>`+
-      `<button class="acao vbtn vbtn-ap" data-ap="${esc(r.n)}" title="Aprovo — envia email e sai da minha lista">Aprovado</button>`+
+    btns=`<button class="acao vbtn" data-va="${esc(r.n)}" title="Vi/verifiquei — vai para o quadro de email">Verificar</button>`+
+      `<button class="acao vbtn vbtn-ap" data-ap="${esc(r.n)}" title="Aprovo — vai para o quadro de email">Aprovado</button>`+
       `<button class="acao vbtn" data-fa="${esc(r.n)}" title="Arquiva este anúncio">Fechar</button>`;
-  } else if(modo==="verif"){
-    esq=`<span class="v-ok">🟢 Verificado</span> · `;
-    btns=`<button class="acao vbtn vbtn-ap" data-ap="${esc(r.n)}" title="Aprovar — envia email e sai da lista">Aprovado</button>`+
+  } else if(modo==="feito"){
+    const v=verOf(r.n)[EU];
+    esq=(v&&v.aprov?`<span class="v-ok">✅ Aprovado</span>`:`<span class="v-ok">🟢 Verificado</span>`)+` · `;
+    chk=`<label class="pv-chk"><input type="checkbox" data-sel="${esc(r.n)}" ${SELV.has(String(r.n))?"checked":""}></label>`;
+    btns=(v&&v.aprov?"":`<button class="acao vbtn vbtn-ap" data-ap="${esc(r.n)}" title="Passar a aprovado">Aprovado</button>`)+
       `<button class="acao vbtn" data-an="${esc(r.n)}" title="Anular (volta a por verificar)">Anular</button>`+
-      `<button class="acao vbtn" data-fa="${esc(r.n)}">Fechar</button>`;
-  } else if(modo==="aprov"){
-    esq=`<span class="v-ok">✅ Aprovado</span> · `;
-    btns=`<button class="acao vbtn" data-an="${esc(r.n)}" title="Anular a aprovação (volta a por verificar)">Anular</button>`+
       `<button class="acao vbtn" data-fa="${esc(r.n)}">Fechar</button>`;
   } else {
     btns=`<button class="acao vbtn" data-rb="${esc(r.n)}" title="Volta a pôr na verificação">Reabrir</button>`+
@@ -443,8 +439,8 @@ function renderVerif(){
   }
   const outroNome=outra(EU);
   const pend=ordAnun(pendentesDe(EU));
-  const verif=verificadosDe(EU);
-  const aprov=aprovadosDe(EU);
+  const feitos=feitosDe(EU);
+  const nSel=feitos.filter(r=>SELV.has(String(r.n))).length;
   const pendOutro=pendentesDe(outroNome).length;
   const verde=pend.length===0;
   if(sem){ sem.classList.toggle("verde",verde); sem.title=verde?"Nada por verificar da sua parte":`${pend.length} anúncio(s) por verificar`; }
@@ -469,15 +465,15 @@ function renderVerif(){
       `<div class="pv-lista">${pend.map(r=>linhaPV(r,"pend")).join("")}</div>`;
   }
 
-  let verifHtml="";
-  if(verif.length) verifHtml=`<div class="pv-sec"><b>Verificados por si (${verif.length})</b> — ainda pode aprovar:`+
-    `<div class="pv-lista" style="margin-top:5px">${verif.map(r=>linhaPV(r,"verif")).join("")}</div></div>`;
-
-  let aprovHtml="";
-  if(aprov.length){
-    aprovHtml=`<div class="v-fech"><button class="v-fechtog" data-toga="1">${mostrarAprovadosV?"▾":"▸"} Aprovados por si (${aprov.length})</button>`;
-    if(mostrarAprovadosV) aprovHtml+=`<div class="pv-lista" style="margin-top:5px">${aprov.map(r=>linhaPV(r,"aprov")).join("")}</div>`;
-    aprovHtml+=`</div>`;
+  // quadro de seleção para envio de email (verificados/aprovados por mim)
+  let feitosHtml="";
+  if(feitos.length){
+    feitosHtml=`<div class="pv-sec"><div class="pv-selbar">`+
+      `<b>Para email — verificados/aprovados por si (${feitos.length})</b>: `+
+      `<button class="acao vbtn" data-seltodos="1">Selecionar todos</button> `+
+      `<button class="acao vbtn" data-selnenhum="1">Nenhum</button> `+
+      `<button class="acao primario vbtn" data-enviar="1">✉ Enviar email dos selecionados (${nSel})</button>`+
+      `</div><div class="pv-lista">${feitos.map(r=>linhaPV(r,"feito")).join("")}</div></div>`;
   }
 
   const fech=anunFechados();
@@ -489,7 +485,7 @@ function renderVerif(){
   }
 
   pv.style.display="block";
-  pv.innerHTML=`<div class="pv-cab">${cab}</div>${lista}${verifHtml}${aprovHtml}${fechHtml}`;
+  pv.innerHTML=`<div class="pv-cab">${cab}</div>${lista}${feitosHtml}${fechHtml}`;
   pv.querySelectorAll("[data-va]").forEach(b=>b.onclick=()=>{ const r=REGS.find(x=>String(x.n)===b.dataset.va); if(r) verificarAnuncios([r]); });
   pv.querySelectorAll("[data-ap]").forEach(b=>b.onclick=()=>{ const r=REGS.find(x=>String(x.n)===b.dataset.ap); if(r) aprovarAnuncios([r]); });
   pv.querySelectorAll("[data-fa]").forEach(b=>b.onclick=()=>fecharAnuncio(b.dataset.fa));
@@ -497,6 +493,7 @@ function renderVerif(){
   pv.querySelectorAll("[data-rb]").forEach(b=>b.onclick=()=>reabrirAnuncio(b.dataset.rb));
   pv.querySelectorAll("[data-fdef]").forEach(b=>b.onclick=()=>fecharAnunDefinitivo(b.dataset.fdef));
   pv.querySelectorAll("[data-p]").forEach(c=>c.onchange=()=>{ const n=String(c.dataset.p); if(c.checked)SELP.add(n); else SELP.delete(n); });
+  pv.querySelectorAll("[data-sel]").forEach(c=>c.onchange=()=>{ const n=String(c.dataset.sel); if(c.checked)SELV.add(n); else SELV.delete(n); const b=pv.querySelector("[data-enviar]"); if(b) b.textContent=`✉ Enviar email dos selecionados (${feitosDe(EU).filter(r=>SELV.has(String(r.n))).length})`; });
   pv.querySelectorAll("[data-open]").forEach(el=>el.onclick=()=>{
     const linha=el.closest(".pv-linha"); const nx=linha.nextElementSibling;
     if(nx&&nx.classList.contains("pv-det")){ nx.remove(); return; }
@@ -507,8 +504,10 @@ function renderVerif(){
   const at=pv.querySelector("[data-atudo]"); if(at) at.onclick=()=>aprovarAnuncios(pend);
   const vs=pv.querySelector("[data-vsel]"); if(vs) vs.onclick=()=>{ const s=pend.filter(r=>SELP.has(String(r.n))); if(!s.length){alert("Marque as caixas dos anúncios que quer verificar.");return;} verificarAnuncios(s); };
   const as=pv.querySelector("[data-asel]"); if(as) as.onclick=()=>{ const s=pend.filter(r=>SELP.has(String(r.n))); if(!s.length){alert("Marque as caixas dos anúncios que quer aprovar.");return;} aprovarAnuncios(s); };
+  const st=pv.querySelector("[data-seltodos]"); if(st) st.onclick=()=>{ feitos.forEach(r=>SELV.add(String(r.n))); renderVerif(); };
+  const sn=pv.querySelector("[data-selnenhum]"); if(sn) sn.onclick=()=>{ feitos.forEach(r=>SELV.delete(String(r.n))); renderVerif(); };
+  const en=pv.querySelector("[data-enviar]"); if(en) en.onclick=enviarSelecionados;
   const tg=pv.querySelector("[data-tog]"); if(tg) tg.onclick=()=>{ mostrarFechadosV=!mostrarFechadosV; renderVerif(); };
-  const tga=pv.querySelector("[data-toga]"); if(tga) tga.onclick=()=>{ mostrarAprovadosV=!mostrarAprovadosV; renderVerif(); };
 }
 
 /* ---------- ir buscar os dados ao mesmo servidor (dados.json.gz) ---------- */
