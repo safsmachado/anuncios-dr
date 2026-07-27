@@ -177,8 +177,14 @@
   .obs-caixa textarea{width:100%;min-height:64px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;
     font-family:inherit;font-size:13px;resize:vertical;background:#fffdf3}
   .obs-caixa .estado-obs{font-size:11.5px;color:var(--muted);margin-top:3px}
-  #vazio{padding:40px;text-align:center;color:var(--muted);background:#fff;border:1px solid var(--line);border-radius:10px;margin-top:14px}
+  #vazio,#cVazio{padding:40px;text-align:center;color:var(--muted);background:#fff;border:1px solid var(--line);border-radius:10px;margin-top:14px}
   .nota{margin-top:16px;font-size:12.5px;color:var(--muted);line-height:1.55}
+  /* separadores Anúncios / Contratos */
+  .abas{display:flex;gap:8px;margin:12px 0 2px}
+  .aba{border:1px solid var(--line);border-bottom:none;background:#eef0f4;color:var(--muted);
+    padding:9px 18px;border-radius:10px 10px 0 0;font-size:14px;font-weight:600;cursor:pointer}
+  .aba.activa{background:#fff;color:var(--fg,#1c2733);box-shadow:0 -2px 0 var(--accent) inset}
+  .grupo-cab.Contrato{background:#e8f1ea;color:#20613b}
 </style>
 </head>
 <body>
@@ -194,6 +200,12 @@
   </span>
 </header>
 <main>
+  <div class="abas">
+    <button class="aba activa" id="abaAn">📢 Anúncios / Concursos</button>
+    <button class="aba" id="abaCt">📄 Contratos celebrados</button>
+  </div>
+
+  <div id="vistaAnuncios">
   <div id="painelVerif"></div>
   <div class="painel painel-topo">
     <div class="campo">
@@ -246,10 +258,58 @@
     <b>Como usar:</b> clique no cabeçalho de um grupo para o minimizar/abrir; clique numa linha para ver toda a informação do anúncio e escrever observações; use o selector de cada linha para marcar «A analisar», «A concorrer» ou «Descartado». As marcações e observações ficam <b>guardadas na nuvem</b> e acompanham-no em qualquer computador. Os <b>contadores</b> por cima das tabelas mostram quantos anúncios estão em cada marcação — clique num contador para ver só esses. Na <b>secção do topo</b> vê os anúncios com marcação/observação que ainda faltam verificar. Clique na entidade/objeto de qualquer linha para <b>abrir o anúncio</b> (ver tudo e escrever observações). Em cada um carregue em «Verificar» (vi) ou «Aprovado» (aprovo) — abre logo um email para o outro com esses anúncios (basta «Enviar»). Pode também marcar as caixas e usar «Verificar/Aprovar selecionados». O <b>Aprovado</b> tira o anúncio da sua lista (vai para «Aprovados por si»). Se depois alguém alterar a marcação, o anúncio volta a aparecer por verificar. Ao abrir, a página mostra os <b>últimos 7 dias</b> (abre mais depressa); para ver mais atrás use os campos «Ver de/até» ou o botão «Todos». A página <b>atualiza-se sozinha todos os dias</b> — pode carregar em «↻ Atualizar» a qualquer momento para ver as novidades.<br>
     <b>Fonte:</b> dados oficiais do Portal BASE / IMPIC (dados.gov.pt). O link «DR» de cada anúncio abre o PDF oficial no Diário da República.
   </p>
+  </div><!-- /vistaAnuncios -->
+
+  <div id="vistaContratos" style="display:none">
+    <div class="painel painel-topo">
+      <div class="campo">
+        <label>Ver — de</label>
+        <input type="date" id="cDe">
+      </div>
+      <div class="campo">
+        <label>até</label>
+        <input type="date" id="cAte">
+      </div>
+      <div class="campo">
+        <label>Períodos rápidos</label>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <button class="acao" id="cBtnRecente">Dia mais recente</button>
+          <button class="acao" id="cBtnUltimos">Últimos</button>
+          <input type="number" id="cNdias" value="3" min="1" max="30" style="width:58px">
+          <span style="font-size:12px;color:var(--muted)">dias</span>
+          <button class="acao" id="cBtnTodos">Todos</button>
+        </div>
+      </div>
+      <div class="campo" style="flex:1;min-width:300px">
+        <label>Pesquisa em tudo (vários termos com ; )</label>
+        <input type="search" id="cPesquisa" placeholder="ex.: escola; pavimentação; 45233141">
+      </div>
+      <button class="acao primario" id="cBtnAtualizar" title="Vai buscar os contratos mais recentes à nuvem">↻ Atualizar</button>
+      <button class="acao" id="cBtnToggleTodos">Minimizar tudo</button>
+    </div>
+
+    <div class="painel">
+      <div class="campo"><label>Categoria</label><div class="ms" id="cMsCat"></div></div>
+      <div class="campo"><label>Tipo de procedimento</label><div class="ms" id="cMsProc"></div></div>
+      <div class="campo"><label>Distrito (local de execução)</label><div class="ms" id="cMsDist"></div></div>
+      <div class="campo"><label>Valor mín. €</label><input type="number" id="cVmin" min="0" step="1000" style="width:105px"></div>
+      <div class="campo"><label>Valor máx. €</label><input type="number" id="cVmax" min="0" step="1000" style="width:105px"></div>
+      <button class="acao" id="cBtnLimpar">Limpar filtros</button>
+    </div>
+
+    <div id="cStatus">A carregar os contratos…</div>
+    <div id="cConteudo"></div>
+    <div id="cVazio" style="display:none">Sem resultados para o período/filtros/pesquisa actuais.</div>
+
+    <p class="nota">
+      <b>Contratos públicos celebrados</b>, publicados diariamente no Portal BASE (base.gov.pt). Clique no cabeçalho de um grupo para o minimizar/abrir; clique numa linha para ver toda a informação do contrato (adjudicatário, CPV, prazo, local de execução, datas). O link «BASE» abre a ficha oficial do contrato no portal. A lista guarda os <b>últimos 30 dias</b> de publicações; ao abrir mostra os últimos 3 dias.<br>
+      <b>Fonte:</b> dados oficiais do Portal BASE / IMPIC (dados.gov.pt), completados ao dia com o próprio base.gov.pt.
+    </p>
+  </div><!-- /vistaContratos -->
 </main>
 
 <script>
-const APP_VER="8.4";        // versão da aplicação (mostrada no canto superior direito)
+const APP_VER="9.0";        // versão da aplicação (mostrada no canto superior direito)
 let META={ver:"",gerado:"",hora:"",de:"",ate:"",janela:120,n:0};
 const CATS=["Obras","Serviços","Serviços de fiscalização","Serviços de projeto","Fornecimento de bens","Concessões","Alterações de procedimento","Outros"];
 const CLS={"Obras":"Obras","Serviços":"Servicos","Serviços de fiscalização":"Fiscalizacao","Serviços de projeto":"Projeto","Fornecimento de bens":"Fornecimento","Concessões":"Concessoes","Alterações de procedimento":"Alteracoes","Outros":"Outros"};
@@ -311,6 +371,8 @@ const APP_URL="https://safsmachado.github.io/anuncios-dr/";
 let EU=""; try{ EU=localStorage.getItem("adr_eu")||""; }catch(e){}
 let EMAIL_MSG="";
 let mostrarFechadosV=false;
+let pvAberto=false;   // painel de verificação começa minimizado
+let pvTudo=false;     // por defeito mostra só os últimos 3 dias
 function outra(q){ return q==="SAFSM"?"JMF":"SAFSM"; }
 function nomeEstado(e){ return ({analisar:"A analisar",concorrer:"A concorrer",descartado:"Descartado"})[e]||"sem marcação"; }
 function temMarca(a){ return !!(a.estado || (a.obs&&a.obs.trim()) || a.decl); }
@@ -324,6 +386,8 @@ function anunMarcados(){ return REGS.filter(r=>temMarca(anot(r.n)) && fxOf(r.n)=
 function pendentesDe(quem){ return anunMarcados().filter(r=>!assinou(quem,r.n)); }
 function ordAnun(arr){ return [...arr].sort((a,b)=> a.data<b.data?1 : a.data>b.data?-1 : (String(a.n)>String(b.n)?1:-1)); }
 function anunFechados(){ return ordAnun(REGS.filter(r=>fxOf(r.n)===1)); }
+function pvCorte(){ const ref=(typeof META!=="undefined"&&META&&(META.ate||META.gerado))||new Date().toISOString().slice(0,10); return menosDias(ref,3); }
+function recente3(r){ return String(r.data||"")>=pvCorte(); }
 
 function exigeEu(){ if(!EU){ alert("Escolha primeiro quem é, no canto superior direito («Sou:»)."); const s=document.getElementById("euSel"); if(s)s.focus(); return false; } return true; }
 
@@ -375,14 +439,16 @@ function enviarSelecionados(){
   const sel=feitosDe(EU).filter(r=>SELV.has(String(r.n)));
   if(!sel.length){ alert("Marque as caixas dos anúncios (verificados/aprovados) que quer incluir no email."); return; }
   const to=PESSOAS[outra(EU)]+","+PESSOAS[EU];
-  const cab=`${EU} — ${sel.length} anúncio(s) verificados/aprovados:\n\n`;
+  const cab=`${EU} — ${sel.length} anúncio(s):\n\n`;
   const linhas=sel.map(r=>{ const v=verOf(r.n)[EU]; const tag=v&&v.aprov?"APROVADO":"VERIFICADO";
-    return `- ${dmy(r.data)} | ${r.ent} — ${(r.obj||"").slice(0,110)}\n  ${tag}: ${nomeEstado(snapAtual(r.n).estado)}\n  ${r.pdf||""}`; });
+    const est=nomeEstado(snapAtual(r.n).estado);
+    const desig=((r.obj&&r.obj.trim())?r.obj.trim():(r.ent||"")).slice(0,140);
+    return `${desig}\n>>> ${tag}${est?" · "+est:""} <<<\n${r.pdf||""}`; });
   const MAX=1600; let usado=cab.length; const inc=[];
   for(const l of linhas){ if(usado+l.length+2>MAX) break; inc.push(l); usado+=l.length+2; }
   const cortados=linhas.length-inc.length;
-  const corpo=cab+inc.join("\n\n")+(cortados>0?`\n\n… e mais ${cortados} anúncio(s). Ver na app: ${APP_URL}`:`\n\nApp: ${APP_URL}`);
-  const assunto=`Anuncios DR - ${EU} enviou ${sel.length} verificados/aprovados`;
+  const corpo=cab+inc.join("\n\n")+(cortados>0?`\n\n… e mais ${cortados}. Ver na app: ${APP_URL}`:``);
+  const assunto=`Anuncios DR - ${EU} enviou ${sel.length}`;
   const url=`mailto:${to}?subject=${encodeURIComponent(assunto)}&body=${encodeURIComponent(corpo)}`;
   const a=document.createElement("a"); a.href=url; document.body.appendChild(a); a.click(); a.remove();
   _emailAberto();
@@ -438,31 +504,47 @@ function renderVerif(){
     return;
   }
   const outroNome=outra(EU);
-  const pend=ordAnun(pendentesDe(EU));
-  const feitos=feitosDe(EU);
-  const nSel=feitos.filter(r=>SELV.has(String(r.n))).length;
+  const pendAll=ordAnun(pendentesDe(EU));
+  const feitosAll=feitosDe(EU);
+  const pend  = pvTudo ? pendAll  : pendAll.filter(recente3);
+  const feitos= pvTudo ? feitosAll: feitosAll.filter(recente3);
+  const nSel=feitosAll.filter(r=>SELV.has(String(r.n))).length;
   const pendOutro=pendentesDe(outroNome).length;
-  const verde=pend.length===0;
-  if(sem){ sem.classList.toggle("verde",verde); sem.title=verde?"Nada por verificar da sua parte":`${pend.length} anúncio(s) por verificar`; }
+  const verde=pendAll.length===0;
+  if(sem){ sem.classList.toggle("verde",verde); sem.title=verde?"Nada por verificar da sua parte":`${pendAll.length} anúncio(s) por verificar`; }
 
-  let cab;
-  if(verde){
-    cab=`🟢 <b>Nada por verificar da sua parte.</b> `+(pendOutro?`Faltam ${pendOutro} ao ${outroNome}.`:`Tudo verificado pelos dois.`);
-    pv.className="pv ok";
-  } else {
-    cab=`⚠ <b>${pend.length} anúncio(s) por verificar.</b> `+
-      `<button class="acao primario vbtn" data-vtudo="1">Verificar todos (${pend.length})</button> `+
-      `<button class="acao vbtn vbtn-ap" data-atudo="1">Aprovar todos (${pend.length})</button>`;
-    pv.className="pv";
-  }
+  // barra de topo (sempre visível): resumo + abrir/minimizar
+  const resumo = verde
+    ? `🟢 Nada por verificar da sua parte`+(pendOutro?` · faltam ${pendOutro} ao ${outroNome}`:` · tudo verificado`)
+    : `⚠ ${pendAll.length} por verificar`+(feitosAll.length?` · ${feitosAll.length} para email`:``);
+  let cab=`<button class="v-fechtog" data-pvtog="1">${pvAberto?"▾":"▸"}</button> <b>${resumo}</b>`;
   if(EMAIL_MSG) cab+=` <span class="v-email">· ${EMAIL_MSG}</span>`;
+  pv.className = verde ? "pv ok" : "pv";
+
+  // minimizado (por defeito): só a barra de topo
+  if(!pvAberto){
+    pv.style.display="block";
+    pv.innerHTML=`<div class="pv-cab">${cab}</div>`;
+    const tgm=pv.querySelector("[data-pvtog]"); if(tgm) tgm.onclick=()=>{ pvAberto=true; renderVerif(); };
+    return;
+  }
+
+  // aberto — alternar «últimos 3 dias» / «todos»
+  const ocult=(pendAll.length-pend.length)+(feitosAll.length-feitos.length);
+  const filtroBar=`<div class="pv-selbar"><span class="ajuda">A mostrar ${pvTudo?"<b>todos</b>":"só os <b>últimos 3 dias</b>"}.</span> `+
+    `<button class="acao vbtn" data-pvtudo="1">${pvTudo?"Ver só últimos 3 dias":`Ver todos${ocult?" (+"+ocult+")":""}`}</button></div>`;
 
   let lista="";
   if(pend.length){
-    lista=`<div class="pv-selbar"><span class="ajuda">Marque as caixas e:</span> `+
+    lista=`<div class="pv-selbar">`+
+      `<button class="acao primario vbtn" data-vtudo="1">Verificar todos (${pend.length})</button> `+
+      `<button class="acao vbtn vbtn-ap" data-atudo="1">Aprovar todos (${pend.length})</button></div>`+
+      `<div class="pv-selbar"><span class="ajuda">Marque as caixas e:</span> `+
       `<button class="acao vbtn" data-vsel="1">Verificar selecionados</button> `+
       `<button class="acao vbtn vbtn-ap" data-asel="1">Aprovar selecionados</button></div>`+
       `<div class="pv-lista">${pend.map(r=>linhaPV(r,"pend")).join("")}</div>`;
+  } else {
+    lista=`<div class="ajuda" style="padding:6px 2px">Nada por verificar${pvTudo?"":" nos últimos 3 dias"}.</div>`;
   }
 
   // quadro de seleção para envio de email (verificados/aprovados por mim)
@@ -485,7 +567,7 @@ function renderVerif(){
   }
 
   pv.style.display="block";
-  pv.innerHTML=`<div class="pv-cab">${cab}</div>${lista}${feitosHtml}${fechHtml}`;
+  pv.innerHTML=`<div class="pv-cab">${cab}</div>${filtroBar}${lista}${feitosHtml}${fechHtml}`;
   pv.querySelectorAll("[data-va]").forEach(b=>b.onclick=()=>{ const r=REGS.find(x=>String(x.n)===b.dataset.va); if(r) verificarAnuncios([r]); });
   pv.querySelectorAll("[data-ap]").forEach(b=>b.onclick=()=>{ const r=REGS.find(x=>String(x.n)===b.dataset.ap); if(r) aprovarAnuncios([r]); });
   pv.querySelectorAll("[data-fa]").forEach(b=>b.onclick=()=>fecharAnuncio(b.dataset.fa));
@@ -508,6 +590,8 @@ function renderVerif(){
   const sn=pv.querySelector("[data-selnenhum]"); if(sn) sn.onclick=()=>{ feitos.forEach(r=>SELV.delete(String(r.n))); renderVerif(); };
   const en=pv.querySelector("[data-enviar]"); if(en) en.onclick=enviarSelecionados;
   const tg=pv.querySelector("[data-tog]"); if(tg) tg.onclick=()=>{ mostrarFechadosV=!mostrarFechadosV; renderVerif(); };
+  const pvt=pv.querySelector("[data-pvtog]"); if(pvt) pvt.onclick=()=>{ pvAberto=false; renderVerif(); };
+  const pvtd=pv.querySelector("[data-pvtudo]"); if(pvtd) pvtd.onclick=()=>{ pvTudo=!pvTudo; renderVerif(); };
 }
 
 /* ---------- ir buscar os dados ao mesmo servidor (dados.json.gz) ---------- */
@@ -539,8 +623,9 @@ let ordCampo="data", ordDir=-1;
 const abertos={}, minimizados={};
 
 /* ---------- menu de escolha múltipla (reutilizável) ---------- */
-function criarMulti(elId, rotulo, opcoes, arr){
-  // opcoes = [{v, txt}]; arr = array em F que guarda os valores selecionados
+function criarMulti(elId, rotulo, opcoes, arr, onch){
+  // opcoes = [{v, txt}]; arr = array em F que guarda os valores selecionados; onch = render a chamar (por defeito o dos anúncios)
+  const rerender=onch||render;
   const el=document.getElementById(elId); if(!el) return;
   const atualizaBtn=()=>{
     const btn=el.querySelector(".ms-btn");
@@ -558,9 +643,9 @@ function criarMulti(elId, rotulo, opcoes, arr){
   el.querySelectorAll('input[type=checkbox]').forEach(chk=>chk.onchange=()=>{
     const v=chk.value;
     if(chk.checked){ if(!arr.includes(v)) arr.push(v); } else { const i=arr.indexOf(v); if(i>=0) arr.splice(i,1); }
-    atualizaBtn(); render();
+    atualizaBtn(); rerender();
   });
-  el.querySelector('[data-a="todas"]').onclick=(e)=>{ e.stopPropagation(); arr.length=0; el.querySelectorAll('input[type=checkbox]').forEach(c=>c.checked=false); atualizaBtn(); render(); };
+  el.querySelector('[data-a="todas"]').onclick=(e)=>{ e.stopPropagation(); arr.length=0; el.querySelectorAll('input[type=checkbox]').forEach(c=>c.checked=false); atualizaBtn(); rerender(); };
   el.querySelector('[data-a="fechar"]').onclick=(e)=>{ e.stopPropagation(); el.classList.remove("aberto"); };
   el.querySelector(".ms-panel").onclick=(e)=>e.stopPropagation();
   atualizaBtn();
@@ -706,7 +791,8 @@ function render(){
   const arr=filtrados();
   const cont=document.getElementById("conteudo");
   const totalVal=arr.reduce((s,r)=>s+(r.preco||0),0);
-  document.getElementById("resumo").textContent=`${arr.length} anúncios · ${eur(totalVal)}`;
+  if(typeof ABA==="undefined" || ABA==="anuncios")
+    document.getElementById("resumo").textContent=`${arr.length} anúncios · ${eur(totalVal)}`;
   cont.innerHTML="";
   let algum=false;
   CATS.forEach(c=>{
@@ -901,6 +987,231 @@ async function atualizarDaNuvem(){
   }catch(e){ btn.textContent="↻ Falhou"; }
   setTimeout(()=>{ btn.textContent=txt; btn.disabled=false; aAtualizar=false; },2800);
 }
+
+/* ================= SEPARADOR «CONTRATOS» (Portal BASE) =================
+   Vista própria, com os mesmos filtros base. Os dados (contratos.json.gz)
+   só são carregados quando se abre o separador pela primeira vez. */
+let ABA="anuncios";
+let CREGS=[], CMETA={}, cCarregado=false, cACarregar=false;
+const CF={cat:[],proc:[],dist:[],vmin:null,vmax:null,de:null,ate:null,pesq:""};
+const cMinim={};
+let cOrdCampo="data", cOrdDir=-1;
+
+async function carregarContratos(){
+  const r=await fetch("contratos.json.gz?t="+Date.now(),{cache:"no-store"});
+  if(!r.ok) throw new Error("ficheiro ainda não disponível");
+  const buf=new Uint8Array(await r.arrayBuffer());
+  let txt;
+  if("DecompressionStream" in window){
+    txt=await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"))).text();
+  }else{ txt=new TextDecoder().decode(buf); }
+  const obj=JSON.parse(txt);
+  CREGS=obj.regs||[];
+  CMETA={ver:obj.ver||"",gerado:obj.gerado||"",hora:obj.hora||"",de:obj.de||"",ate:obj.ate||"",janela:obj.janela||30,n:CREGS.length};
+}
+
+function cDatasMinMax(){ const d=[...new Set(CREGS.map(r=>r.data))].sort(); return d.length?{min:d[0],max:d[d.length-1]}:{min:null,max:null}; }
+function cAplicarPeriodo(de,ate){ document.getElementById("cDe").value=de; document.getElementById("cAte").value=ate; CF.de=de; CF.ate=ate; cRender(); }
+function cDatasDefeito(){
+  const {min,max}=cDatasMinMax(); if(!max) return;
+  let de=menosDias(max,3); if(min&&de<min)de=min;
+  document.getElementById("cDe").value=de; CF.de=de;
+  document.getElementById("cAte").value=max; CF.ate=max;
+}
+function cCatsLista(){
+  const presentes=[...new Set(CREGS.map(r=>r.cat).filter(Boolean))];
+  return CATS.filter(c=>presentes.includes(c)).concat(presentes.filter(c=>!CATS.includes(c)).sort());
+}
+function cInitFiltros(){
+  criarMulti("cMsCat","Categoria", cCatsLista().map(c=>({v:c,txt:c})), CF.cat, cRender);
+  const tp=[...new Set(CREGS.map(r=>r.proc).filter(Boolean))].sort();
+  criarMulti("cMsProc","Tipo de procedimento", tp.map(t=>({v:t,txt:t})), CF.proc, cRender);
+  const dl=[...new Set(CREGS.map(r=>r.dist).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pt"));
+  const semLoc=CREGS.some(r=>!r.dist);
+  criarMulti("cMsDist","Distrito", dl.map(d=>({v:d,txt:d})).concat(semLoc?[{v:"__sem__",txt:"(sem local)"}]:[]), CF.dist, cRender);
+}
+function cFiltrados(){
+  const termos=CF.pesq?CF.pesq.toLowerCase().split(";").map(t=>t.trim()).filter(Boolean):[];
+  return CREGS.filter(r=>{
+    if(CF.de && r.data<CF.de) return false;
+    if(CF.ate && r.data>CF.ate) return false;
+    if(CF.cat.length && !CF.cat.includes(r.cat)) return false;
+    if(CF.proc.length && !CF.proc.includes(r.proc)) return false;
+    if(CF.dist.length){ const d=r.dist||""; const ok = d?CF.dist.includes(d):CF.dist.includes("__sem__"); if(!ok) return false; }
+    if(CF.vmin!=null && !(r.preco>=CF.vmin)) return false;
+    if(CF.vmax!=null && !(r.preco<=CF.vmax)) return false;
+    if(termos.length){
+      const blob=[r.n,r.ent,r.adj,r.obj,r.proc,r.tipo,r.local,r.dist,(r.cpv||[]).join(" ")].join(" ").toLowerCase();
+      if(!termos.every(t=>blob.includes(t))) return false;
+    }
+    return true;
+  });
+}
+function cOrdenar(arr){
+  return [...arr].sort((a,b)=>{
+    let x=a[cOrdCampo], y=b[cOrdCampo];
+    if(cOrdCampo==="preco"){ x=x||0; y=y||0; return (x-y)*cOrdDir; }
+    x=(x==null?"":String(x)).toLowerCase(); y=(y==null?"":String(y)).toLowerCase();
+    return x<y?-1*cOrdDir:x>y?1*cOrdDir:0;
+  });
+}
+function cDetGrid(r){
+  const li=(t,v)=>v?`<div><b>${t}</b><div>${v}</div></div>`:"";
+  return `<div class="det-grid">`+
+    li("Objeto do contrato", esc(r.obj||"—"))+
+    li("Adjudicante", esc(r.ent||"—"))+
+    li("Adjudicatário(s)", esc(r.adj||"—"))+
+    li("Preço contratual", eur(r.preco))+
+    li("Tipo(s) de contrato", esc(r.tipo||"—"))+
+    li("Procedimento", esc(r.proc||"—"))+
+    li("CPV", esc((r.cpv||[]).join(" · ")||"—"))+
+    li("Local de execução", esc(r.local||"—"))+
+    li("Data de publicação", dmy(r.data))+
+    li("Data de celebração", r.cel?dmy(r.cel):"—")+
+    li("Prazo de execução", r.prazo?esc(r.prazo)+" dias":"—")+
+    li("Ficha no Portal BASE", r.url?`<a class="dr" href="${esc(r.url)}" target="_blank" rel="noopener">Abrir no BASE ↗</a>`:"—")+
+    `</div>`;
+}
+function cLinha(r){
+  const tr=document.createElement("tr");
+  tr.className="linha";
+  tr.innerHTML=`
+    <td class="nw">${dmy(r.data)}</td>
+    <td><div class="ent">${esc(r.ent)}</div><div class="obj">${esc(r.obj||"")}</div></td>
+    <td><div class="obj" style="max-width:260px">${esc(r.adj||"—")}</div></td>
+    <td class="nw">${esc(r.proc||"—")}</td>
+    <td class="num">${eur(r.preco)}</td>
+    <td class="nw">${esc(r.dist||"—")}</td>
+    <td class="nw">${r.url?`<a class="dr" href="${esc(r.url)}" target="_blank" rel="noopener">BASE ↗</a>`:"—"}</td>`;
+  tr.onclick=(ev)=>{
+    if(ev.target.closest("a")) return;
+    const nx=tr.nextElementSibling;
+    if(nx && nx.classList.contains("detalhe")){ nx.remove(); return; }
+    const trd=document.createElement("tr"); trd.className="detalhe";
+    trd.innerHTML=`<td colspan="7">${cDetGrid(r)}</td>`;
+    tr.after(trd);
+  };
+  return tr;
+}
+function cStatusTxt(){
+  const st=document.getElementById("cStatus"); if(!st) return;
+  const {max}=cDatasMinMax();
+  st.textContent=`${CREGS.length} contratos · ${dmy(CMETA.de)}–${dmy(max)} · fonte Portal BASE/IMPIC`+
+    (CMETA.gerado?` · atualizado ${dmy(CMETA.gerado)}${CMETA.hora?" "+CMETA.hora:""}`:``);
+}
+function cRender(){
+  if(!cCarregado) return;
+  const arr=cFiltrados();
+  const cont=document.getElementById("cConteudo");
+  const totalVal=arr.reduce((s,r)=>s+(r.preco||0),0);
+  if(ABA==="contratos")
+    document.getElementById("resumo").textContent=`${arr.length} contratos · ${eur(totalVal)}`;
+  cont.innerHTML="";
+  let algum=false;
+  cCatsLista().forEach(c=>{
+    const doGrupo=cOrdenar(arr.filter(r=>r.cat===c));
+    if(!doGrupo.length) return;
+    algum=true;
+    const soma=doGrupo.reduce((s,r)=>s+(r.preco||0),0);
+    const aberto=!cMinim[c];
+    const div=document.createElement("div");
+    div.className="grupo"+(aberto?" aberto":"");
+    div.innerHTML=`
+      <div class="grupo-cab ${CLS[c]||"Outros"}">
+        <span class="seta">${aberto?"▾":"▸"}</span>
+        <span>${c}</span>
+        <span class="sub">· ${doGrupo.length} contratos · ${eur(soma)}</span>
+      </div>
+      <div class="tabela-wrap" ${aberto?"":'style="display:none"'}>
+        <table>
+          <thead><tr>
+            <th data-o="data" class="nw">Publicado</th>
+            <th data-o="ent">Adjudicante / Objeto</th>
+            <th data-o="adj">Adjudicatário</th>
+            <th data-o="proc" class="nw">Procedimento</th>
+            <th data-o="preco" class="num">Preço</th>
+            <th data-o="dist" class="nw">Distrito</th>
+            <th class="nw">BASE</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>`;
+    div.querySelector(".grupo-cab").onclick=()=>{ cMinim[c]=aberto; cRender(); };
+    div.querySelectorAll("th[data-o]").forEach(th=>th.onclick=(e)=>{
+      e.stopPropagation();
+      const campo=th.dataset.o; if(cOrdCampo===campo) cOrdDir*=-1; else {cOrdCampo=campo; cOrdDir=1;} cRender();
+    });
+    const tb=div.querySelector("tbody");
+    doGrupo.forEach(r=>tb.appendChild(cLinha(r)));
+    cont.appendChild(div);
+  });
+  document.getElementById("cVazio").style.display=algum?"none":"block";
+}
+function cInitEventos(){
+  document.getElementById("cDe").onchange=e=>{CF.de=e.target.value;cRender();};
+  document.getElementById("cAte").onchange=e=>{CF.ate=e.target.value;cRender();};
+  document.getElementById("cBtnRecente").onclick=()=>{ const {max}=cDatasMinMax(); if(max) cAplicarPeriodo(max,max); };
+  document.getElementById("cBtnUltimos").onclick=()=>{ const {min,max}=cDatasMinMax(); if(!max) return; let n=parseInt(document.getElementById("cNdias").value)||3; let de=menosDias(max,n); if(min&&de<min)de=min; cAplicarPeriodo(de,max); };
+  document.getElementById("cNdias").onkeydown=e=>{ if(e.key==="Enter") document.getElementById("cBtnUltimos").click(); };
+  document.getElementById("cBtnTodos").onclick=()=>{ const {min,max}=cDatasMinMax(); if(min) cAplicarPeriodo(min,max); };
+  const lento=debounce(cRender,250);
+  document.getElementById("cPesquisa").oninput=e=>{CF.pesq=e.target.value.trim();lento();};
+  document.getElementById("cVmin").oninput=e=>{CF.vmin=e.target.value?+e.target.value:null;lento();};
+  document.getElementById("cVmax").oninput=e=>{CF.vmax=e.target.value?+e.target.value:null;lento();};
+  document.getElementById("cBtnLimpar").onclick=()=>{
+    CF.cat.length=0; CF.proc.length=0; CF.dist.length=0; CF.vmin=null; CF.vmax=null;
+    document.getElementById("cVmin").value=""; document.getElementById("cVmax").value="";
+    cInitFiltros(); cRender();
+  };
+  document.getElementById("cBtnToggleTodos").onclick=()=>{
+    const cats=cCatsLista();
+    const algumAberto=cats.some(c=>!cMinim[c]);
+    cats.forEach(c=>cMinim[c]=algumAberto);
+    document.getElementById("cBtnToggleTodos").textContent=algumAberto?"Abrir tudo":"Minimizar tudo";
+    cRender();
+  };
+  document.getElementById("cBtnAtualizar").onclick=async()=>{
+    const btn=document.getElementById("cBtnAtualizar"); const txt=btn.textContent;
+    btn.textContent="↻ a atualizar…"; btn.disabled=true;
+    const antes=CREGS.length;
+    try{
+      const maxAntes=cDatasMinMax().max;
+      await carregarContratos();
+      const maxDepois=cDatasMinMax().max;
+      if(maxDepois && (CF.ate||"")<maxDepois && (!CF.ate || !maxAntes || CF.ate>=maxAntes)){ CF.ate=maxDepois; document.getElementById("cAte").value=maxDepois; }
+      cInitFiltros(); cStatusTxt(); cRender();
+      const dif=CREGS.length-antes;
+      btn.textContent = dif>0 ? `↻ +${dif} novos` : "↻ Atualizado";
+    }catch(e){ btn.textContent="↻ Falhou"; }
+    setTimeout(()=>{ btn.textContent=txt; btn.disabled=false; },2800);
+  };
+}
+async function cArrancar(){
+  cACarregar=true;
+  const st=document.getElementById("cStatus");
+  st.textContent="A carregar os contratos…";
+  try{
+    await carregarContratos();
+    cCarregado=true;
+    cInitFiltros(); cDatasDefeito(); cInitEventos(); cStatusTxt(); cRender();
+  }catch(e){
+    st.innerHTML=`<span style="color:#b02a2a">Ainda não há dados de contratos (${esc(e.message)}). O robô cria o ficheiro na próxima atualização automática — tente mais tarde.</span>`;
+    cACarregar=false;   // permite tentar outra vez ao voltar ao separador
+  }
+}
+function mostrarAba(a){
+  ABA=a;
+  document.getElementById("vistaAnuncios").style.display = a==="anuncios"?"":"none";
+  document.getElementById("vistaContratos").style.display = a==="contratos"?"":"none";
+  document.getElementById("abaAn").classList.toggle("activa", a==="anuncios");
+  document.getElementById("abaCt").classList.toggle("activa", a==="contratos");
+  if(a==="contratos"){
+    if(!cCarregado && !cACarregar) cArrancar();
+    else if(cCarregado) cRender();
+  } else { render(); }
+}
+document.getElementById("abaAn").onclick=()=>mostrarAba("anuncios");
+document.getElementById("abaCt").onclick=()=>mostrarAba("contratos");
 
 /* ---------- arranque ---------- */
 (async function(){

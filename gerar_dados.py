@@ -4,9 +4,11 @@
 # Fonte 2: Diário da República (site) via Playwright — dias mais recentes.
 import json, gzip, datetime, urllib.request, sys, os, re, asyncio
 
-VERSAO = "8.4"          # versão da app/dados (aparece na página)
+VERSAO = "9.0"          # versão da app/dados (aparece na página)
 DATASET_ID = "66d72fbc58cd7a63dae28712"
 JANELA_DIAS = 120
+CTR_DATASET = "66d72d488ca4b7cb2de28712"   # Contratos Públicos - Portal BASE - IMPIC (contratos{ano}.zip)
+JANELA_CTR = 30                             # janela de contratos (dias) — ~800-1100/dia
 KEEP = {"Anúncio de procedimento", "Anúncio de concurso urgente", "Anúncio de Alteração"}
 
 import unicodedata as _ud
@@ -369,6 +371,170 @@ async def dr_ao_vivo(dias):
         await b.close()
     return recs
 
+# ---------- CONTRATOS (Portal BASE) ----------
+_DISTS_OK={"aveiro","beja","braga","braganca","castelo branco","coimbra","evora","faro","guarda","leiria",
+           "lisboa","portalegre","porto","santarem","setubal","viana do castelo","vila real","viseu"}
+
+def ctr_local(le):
+    """localExecucao ['Portugal, Distrito, Concelho', ...] -> (local, distrito/zona)."""
+    if not le: return "", ""
+    lst = le if isinstance(le, list) else [le]
+    for s in lst:
+        parts=[p.strip() for p in str(s).split(",") if p.strip()]
+        if not parts: continue
+        if _na(parts[0])!="portugal":
+            continue
+        if len(parts)<2:
+            return "Portugal", ""
+        d=_na(parts[1]); loc=", ".join(parts[1:])
+        if d in _DISTS_OK: return loc, parts[1]
+        if "madeira" in d or "porto santo" in d: return loc, "Madeira"
+        if "acores" in d or d.startswith("ilha"): return loc, "Açores"
+        return loc, ""
+    return str(lst[0]).strip()[:90], ""
+
+def _ent_limpa(lst, max_n=2):
+    """['600052737 - Nome', ...] -> 'Nome | Nome2 (+N)'."""
+    out=[]
+    for s in (lst or []):
+        m=re.match(r"^\s*\d{9}\s*-\s*(.+)$", str(s))
+        out.append((m.group(1) if m else str(s)).strip())
+    if not out: return ""
+    extra=f" (+{len(out)-max_n})" if len(out)>max_n else ""
+    return " | ".join(out[:max_n])+extra
+
+def _preco_eur(s):
+    if s in (None,""): return None
+    try: return float(str(s).replace("€","").replace(".","").replace("\xa0","").replace(" ","").replace(",","."))
+    except Exception: return None
+
+def _ctr_cat(obj, cpvs, tipos):
+    cat_base=categoria(tipos)
+    if is_fisc(obj, cpvs): return "Serviços de fiscalização"
+    if is_proj(obj, cpvs, cat_base): return "Serviços de projeto"
+    return cat_base
+
+def _ctr_url(cid): return f"https://www.base.gov.pt/Base4/pt/detalhe/?type=contratos&id={cid}"
+
+def contratos_oficial(ano, corte):
+    """Ficheiro anual contratos{ano}.zip do dados.gov.pt (atualizado diariamente, dados até D-1)."""
+    import zipfile, io
+    meta=json.loads(http_get(f"https://dados.gov.pt/api/1/datasets/{CTR_DATASET}/"))
+    url=None
+    for r in meta["resources"]:
+        if r.get("title","").lower()==f"contratos{ano}.zip":
+            url=r.get("latest") or r["url"]; break
+    if not url:
+        log(f"contratos: contratos{ano}.zip não encontrado"); return []
+    raw=http_get(url, timeout=600)
+    zf=zipfile.ZipFile(io.BytesIO(raw))
+    recs=json.loads(zf.read(zf.namelist()[0]).decode("utf-8"))
+    out=[]
+    for r in recs:
+        dp=iso(r.get("dataPublicacao",""))
+        if not dp or dp<corte: continue
+        obj=re.sub(r"[\x7f-\x9f]"," ",(r.get("objectoContrato") or r.get("descContrato") or "")).strip()
+        cpvs=r.get("cpv") or []
+        tipos=r.get("tipoContrato") or []
+        loc,dist=ctr_local(r.get("localExecucao"))
+        try: preco=float(r.get("precoContratual")) if r.get("precoContratual") not in (None,"") else None
+        except Exception: preco=None
+        out.append({"n":r.get("idcontrato"),"data":dp,
+            "ent":_ent_limpa(r.get("adjudicante"),1),"adj":_ent_limpa(r.get("adjudicatarios")),
+            "obj":obj[:300],"preco":preco,"cpv":[str(c)[:80] for c in cpvs[:2]],
+            "tipo":" / ".join(str(t) for t in tipos)[:80],"proc":r.get("tipoprocedimento"),
+            "prazo":r.get("prazoExecucao"),"cel":iso(r.get("dataCelebracaoContrato","") or "") or "",
+            "cat":_ctr_cat(obj,cpvs,tipos),"local":loc[:90],"dist":dist,"url":_ctr_url(r.get("idcontrato"))})
+    return out
+
+def _base_post(data, timeout=60):
+    import urllib.parse, time
+    body=urllib.parse.urlencode(data).encode()
+    last=None
+    for t in range(3):
+        try:
+            req=urllib.request.Request("https://www.base.gov.pt/Base4/pt/resultados/", data=body,
+                headers={"User-Agent":"Mozilla/5.0","Content-Type":"application/x-www-form-urlencoded; charset=UTF-8"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except Exception as e:
+            last=e; time.sleep(2*(t+1))
+    raise last
+
+def contratos_vivo(desde, max_det=600, max_pag=80):
+    """Contratos publicados a partir de «desde» (dias em falta depois do ficheiro oficial),
+    via pesquisa do base.gov.pt SEM filtro de datas (com filtro o servidor demora ~20-30s por página;
+    sem filtro demora ~1-2s). Varre por ordem -publicationDate e pára ao chegar a dias já cobertos.
+    Para cada contrato pede o detalhe (local de execução, CPV, tipo) — limitado a max_det pedidos."""
+    out=[]; ndet=0
+    q="tipo=0&tipocontrato=0&pais=187&distrito=0&concelho=0"
+    for page in range(max_pag):
+        d=_base_post({"type":"search_contratos","version":"91.0","query":q,"sort":"-publicationDate","page":page,"size":50})
+        items=d.get("items") or []
+        if not items: break
+        antigos=0
+        for it in items:
+            dp=iso2(it.get("publicationDate",""))
+            if not dp or dp<desde:
+                antigos+=1; continue
+            cid=it.get("id")
+            b={"n":cid,"data":dp,
+               "ent":(it.get("contracting") or "").strip(),"adj":(it.get("contracted") or "").strip(),
+               "obj":re.sub(r"[\x7f-\x9f]"," ",(it.get("objectBriefDescription") or "")).strip()[:300],
+               "preco":_preco_eur(it.get("initialContractualPrice")),
+               "cpv":[],"tipo":"","proc":it.get("contractingProcedureType"),
+               "prazo":"","cel":iso2(it.get("signingDate","") or ""),
+               "cat":"","local":"","dist":"","url":_ctr_url(cid)}
+            if ndet<max_det:
+                try:
+                    det=_base_post({"type":"detail_contratos","version":"91.0","id":cid}); ndet+=1
+                    if det.get("cpvs"): b["cpv"]=[f"{det.get('cpvs')} - {det.get('cpvsDesignation') or ''}".strip(" -")[:80]]
+                    b["tipo"]=(det.get("contractTypes") or "")[:80]
+                    b["prazo"]=re.sub(r"\D","",str(det.get("executionDeadline") or "")) or ""
+                    loc,dist=ctr_local([det.get("executionPlace") or ""])
+                    b["local"]=loc[:90]; b["dist"]=dist
+                except Exception: pass
+            b["cat"]=_ctr_cat(b["obj"], b["cpv"], [b["tipo"]] if b["tipo"] else [])
+            out.append(b)
+        if page%10==0: log(f"contratos vivo: página {page}, acumulado {len(out)} (detalhes {ndet})")
+        if antigos==len(items): break    # página inteira já antes de «desde» ⇒ terminámos
+    log(f"contratos vivo: {len(out)} contratos desde {desde} (detalhes {ndet})")
+    return out
+
+def gerar_contratos(hoje):
+    corte_prov=(hoje-datetime.timedelta(days=JANELA_CTR+7)).isoformat()
+    anos=sorted({(hoje-datetime.timedelta(days=JANELA_CTR+7)).year, hoje.year})
+    ctr=[]
+    for ano in anos:
+        log(f"A obter contratos {ano}…")
+        try:
+            parte=contratos_oficial(ano, corte_prov)
+            log(f"contratos oficial {ano}: {len(parte)}")
+            ctr+=parte
+        except Exception as e:
+            log(f"contratos oficial {ano} falhou:", repr(e))
+    # complemento ao vivo para os dias em falta (normalmente só hoje)
+    try:
+        maxc=max((r["data"] for r in ctr if r.get("data")), default=None)
+        ini=(datetime.date.fromisoformat(maxc)+datetime.timedelta(days=1)) if maxc else (hoje-datetime.timedelta(days=2))
+        if ini<=hoje:
+            ctr+=contratos_vivo(max(ini,hoje-datetime.timedelta(days=3)).isoformat())
+    except Exception as e:
+        log("contratos vivo indisponível:", repr(e))
+    if not ctr:
+        log("contratos: nada obtido — contratos.json.gz não escrito"); return
+    ultimo=max(r["data"] for r in ctr if r["data"])
+    corte=(datetime.date.fromisoformat(ultimo)-datetime.timedelta(days=JANELA_CTR)).isoformat()
+    porN={}
+    for r in ctr:                # o oficial vem primeiro ⇒ prioridade sobre o «vivo»
+        if r.get("data") and r["data"]>=corte: porN.setdefault(r["n"], r)
+    jan=sorted(porN.values(), key=lambda x:(x["data"], str(x["n"])))
+    de=min(r["data"] for r in jan); ate=max(r["data"] for r in jan)
+    obj={"ver":VERSAO,"gerado":hoje.isoformat(),"hora":hora_lisboa(),"de":de,"ate":ate,"janela":JANELA_CTR,"regs":jan}
+    with gzip.open(os.path.join(os.path.dirname(os.path.abspath(__file__)),"contratos.json.gz"),"wb") as f:
+        f.write(json.dumps(obj, ensure_ascii=False).encode("utf-8"))
+    log(f"Escrito contratos.json.gz: {len(jan)} contratos, {de}..{ate}")
+
 def hora_lisboa():
     try:
         from zoneinfo import ZoneInfo
@@ -422,6 +588,12 @@ def main():
     with gzip.open(os.path.join(os.path.dirname(os.path.abspath(__file__)),"dados.json.gz"),"wb") as f:
         f.write(data)
     log(f"Escrito dados.json.gz: {len(janela)} anúncios, {de}..{ate}")
+
+    # ---------- separador CONTRATOS (nunca pode estragar os anúncios) ----------
+    try:
+        gerar_contratos(hoje)
+    except Exception as e:
+        log("CONTRATOS falharam (anúncios não afetados):", repr(e))
 
 if __name__=="__main__":
     main()
