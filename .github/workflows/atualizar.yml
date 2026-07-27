@@ -21,7 +21,7 @@ concurrency:
 jobs:
   build-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 30     # nunca fica pendurado mais de 30 min
+    timeout-minutes: 45     # nunca fica pendurado mais de 45 min (contratos ao vivo podem demorar)
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
@@ -41,6 +41,7 @@ jobs:
           mkdir -p _site
           cp index.html _site/index.html
           cp dados.json.gz _site/dados.json.gz
+          if [ -f contratos.json.gz ]; then cp contratos.json.gz _site/contratos.json.gz; fi
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
