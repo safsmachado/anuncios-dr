@@ -309,7 +309,7 @@
 </main>
 
 <script>
-const APP_VER="9.0";        // versão da aplicação (mostrada no canto superior direito)
+const APP_VER="9.1";        // versão da aplicação (mostrada no canto superior direito)
 let META={ver:"",gerado:"",hora:"",de:"",ate:"",janela:120,n:0};
 const CATS=["Obras","Serviços","Serviços de fiscalização","Serviços de projeto","Fornecimento de bens","Concessões","Alterações de procedimento","Outros"];
 const CLS={"Obras":"Obras","Serviços":"Servicos","Serviços de fiscalização":"Fiscalizacao","Serviços de projeto":"Projeto","Fornecimento de bens":"Fornecimento","Concessões":"Concessoes","Alterações de procedimento":"Alteracoes","Outros":"Outros"};
@@ -371,8 +371,6 @@ const APP_URL="https://safsmachado.github.io/anuncios-dr/";
 let EU=""; try{ EU=localStorage.getItem("adr_eu")||""; }catch(e){}
 let EMAIL_MSG="";
 let mostrarFechadosV=false;
-let pvAberto=false;   // painel de verificação começa minimizado
-let pvTudo=false;     // por defeito mostra só os últimos 3 dias
 function outra(q){ return q==="SAFSM"?"JMF":"SAFSM"; }
 function nomeEstado(e){ return ({analisar:"A analisar",concorrer:"A concorrer",descartado:"Descartado"})[e]||"sem marcação"; }
 function temMarca(a){ return !!(a.estado || (a.obs&&a.obs.trim()) || a.decl); }
@@ -386,8 +384,6 @@ function anunMarcados(){ return REGS.filter(r=>temMarca(anot(r.n)) && fxOf(r.n)=
 function pendentesDe(quem){ return anunMarcados().filter(r=>!assinou(quem,r.n)); }
 function ordAnun(arr){ return [...arr].sort((a,b)=> a.data<b.data?1 : a.data>b.data?-1 : (String(a.n)>String(b.n)?1:-1)); }
 function anunFechados(){ return ordAnun(REGS.filter(r=>fxOf(r.n)===1)); }
-function pvCorte(){ const ref=(typeof META!=="undefined"&&META&&(META.ate||META.gerado))||new Date().toISOString().slice(0,10); return menosDias(ref,3); }
-function recente3(r){ return String(r.data||"")>=pvCorte(); }
 
 function exigeEu(){ if(!EU){ alert("Escolha primeiro quem é, no canto superior direito («Sou:»)."); const s=document.getElementById("euSel"); if(s)s.focus(); return false; } return true; }
 
@@ -504,47 +500,31 @@ function renderVerif(){
     return;
   }
   const outroNome=outra(EU);
-  const pendAll=ordAnun(pendentesDe(EU));
-  const feitosAll=feitosDe(EU);
-  const pend  = pvTudo ? pendAll  : pendAll.filter(recente3);
-  const feitos= pvTudo ? feitosAll: feitosAll.filter(recente3);
-  const nSel=feitosAll.filter(r=>SELV.has(String(r.n))).length;
+  const pend=ordAnun(pendentesDe(EU));
+  const feitos=feitosDe(EU);
+  const nSel=feitos.filter(r=>SELV.has(String(r.n))).length;
   const pendOutro=pendentesDe(outroNome).length;
-  const verde=pendAll.length===0;
-  if(sem){ sem.classList.toggle("verde",verde); sem.title=verde?"Nada por verificar da sua parte":`${pendAll.length} anúncio(s) por verificar`; }
+  const verde=pend.length===0;
+  if(sem){ sem.classList.toggle("verde",verde); sem.title=verde?"Nada por verificar da sua parte":`${pend.length} anúncio(s) por verificar`; }
 
-  // barra de topo (sempre visível): resumo + abrir/minimizar
-  const resumo = verde
-    ? `🟢 Nada por verificar da sua parte`+(pendOutro?` · faltam ${pendOutro} ao ${outroNome}`:` · tudo verificado`)
-    : `⚠ ${pendAll.length} por verificar`+(feitosAll.length?` · ${feitosAll.length} para email`:``);
-  let cab=`<button class="v-fechtog" data-pvtog="1">${pvAberto?"▾":"▸"}</button> <b>${resumo}</b>`;
-  if(EMAIL_MSG) cab+=` <span class="v-email">· ${EMAIL_MSG}</span>`;
-  pv.className = verde ? "pv ok" : "pv";
-
-  // minimizado (por defeito): só a barra de topo
-  if(!pvAberto){
-    pv.style.display="block";
-    pv.innerHTML=`<div class="pv-cab">${cab}</div>`;
-    const tgm=pv.querySelector("[data-pvtog]"); if(tgm) tgm.onclick=()=>{ pvAberto=true; renderVerif(); };
-    return;
+  let cab;
+  if(verde){
+    cab=`🟢 <b>Nada por verificar da sua parte.</b> `+(pendOutro?`Faltam ${pendOutro} ao ${outroNome}.`:`Tudo verificado pelos dois.`);
+    pv.className="pv ok";
+  } else {
+    cab=`⚠ <b>${pend.length} anúncio(s) por verificar.</b> `+
+      `<button class="acao primario vbtn" data-vtudo="1">Verificar todos (${pend.length})</button> `+
+      `<button class="acao vbtn vbtn-ap" data-atudo="1">Aprovar todos (${pend.length})</button>`;
+    pv.className="pv";
   }
-
-  // aberto — alternar «últimos 3 dias» / «todos»
-  const ocult=(pendAll.length-pend.length)+(feitosAll.length-feitos.length);
-  const filtroBar=`<div class="pv-selbar"><span class="ajuda">A mostrar ${pvTudo?"<b>todos</b>":"só os <b>últimos 3 dias</b>"}.</span> `+
-    `<button class="acao vbtn" data-pvtudo="1">${pvTudo?"Ver só últimos 3 dias":`Ver todos${ocult?" (+"+ocult+")":""}`}</button></div>`;
+  if(EMAIL_MSG) cab+=` <span class="v-email">· ${EMAIL_MSG}</span>`;
 
   let lista="";
   if(pend.length){
-    lista=`<div class="pv-selbar">`+
-      `<button class="acao primario vbtn" data-vtudo="1">Verificar todos (${pend.length})</button> `+
-      `<button class="acao vbtn vbtn-ap" data-atudo="1">Aprovar todos (${pend.length})</button></div>`+
-      `<div class="pv-selbar"><span class="ajuda">Marque as caixas e:</span> `+
+    lista=`<div class="pv-selbar"><span class="ajuda">Marque as caixas e:</span> `+
       `<button class="acao vbtn" data-vsel="1">Verificar selecionados</button> `+
       `<button class="acao vbtn vbtn-ap" data-asel="1">Aprovar selecionados</button></div>`+
       `<div class="pv-lista">${pend.map(r=>linhaPV(r,"pend")).join("")}</div>`;
-  } else {
-    lista=`<div class="ajuda" style="padding:6px 2px">Nada por verificar${pvTudo?"":" nos últimos 3 dias"}.</div>`;
   }
 
   // quadro de seleção para envio de email (verificados/aprovados por mim)
@@ -567,7 +547,7 @@ function renderVerif(){
   }
 
   pv.style.display="block";
-  pv.innerHTML=`<div class="pv-cab">${cab}</div>${filtroBar}${lista}${feitosHtml}${fechHtml}`;
+  pv.innerHTML=`<div class="pv-cab">${cab}</div>${lista}${feitosHtml}${fechHtml}`;
   pv.querySelectorAll("[data-va]").forEach(b=>b.onclick=()=>{ const r=REGS.find(x=>String(x.n)===b.dataset.va); if(r) verificarAnuncios([r]); });
   pv.querySelectorAll("[data-ap]").forEach(b=>b.onclick=()=>{ const r=REGS.find(x=>String(x.n)===b.dataset.ap); if(r) aprovarAnuncios([r]); });
   pv.querySelectorAll("[data-fa]").forEach(b=>b.onclick=()=>fecharAnuncio(b.dataset.fa));
@@ -590,8 +570,6 @@ function renderVerif(){
   const sn=pv.querySelector("[data-selnenhum]"); if(sn) sn.onclick=()=>{ feitos.forEach(r=>SELV.delete(String(r.n))); renderVerif(); };
   const en=pv.querySelector("[data-enviar]"); if(en) en.onclick=enviarSelecionados;
   const tg=pv.querySelector("[data-tog]"); if(tg) tg.onclick=()=>{ mostrarFechadosV=!mostrarFechadosV; renderVerif(); };
-  const pvt=pv.querySelector("[data-pvtog]"); if(pvt) pvt.onclick=()=>{ pvAberto=false; renderVerif(); };
-  const pvtd=pv.querySelector("[data-pvtudo]"); if(pvtd) pvtd.onclick=()=>{ pvTudo=!pvTudo; renderVerif(); };
 }
 
 /* ---------- ir buscar os dados ao mesmo servidor (dados.json.gz) ---------- */

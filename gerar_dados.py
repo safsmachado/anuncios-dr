@@ -4,7 +4,7 @@
 # Fonte 2: Diário da República (site) via Playwright — dias mais recentes.
 import json, gzip, datetime, urllib.request, sys, os, re, asyncio
 
-VERSAO = "9.0"          # versão da app/dados (aparece na página)
+VERSAO = "9.1"          # versão da app/dados (aparece na página)
 DATASET_ID = "66d72fbc58cd7a63dae28712"
 JANELA_DIAS = 120
 CTR_DATASET = "66d72d488ca4b7cb2de28712"   # Contratos Públicos - Portal BASE - IMPIC (contratos{ano}.zip)
