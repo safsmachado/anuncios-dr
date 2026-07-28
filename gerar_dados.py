@@ -4,7 +4,7 @@
 # Fonte 2: Diário da República (site) via Playwright — dias mais recentes.
 import json, gzip, datetime, urllib.request, sys, os, re, asyncio
 
-VERSAO = "9.1"          # versão da app/dados (aparece na página)
+VERSAO = "9.2"          # versão da app/dados (aparece na página)
 DATASET_ID = "66d72fbc58cd7a63dae28712"
 JANELA_DIAS = 120
 CTR_DATASET = "66d72d488ca4b7cb2de28712"   # Contratos Públicos - Portal BASE - IMPIC (contratos{ano}.zip)
@@ -393,15 +393,38 @@ def ctr_local(le):
         return loc, ""
     return str(lst[0]).strip()[:90], ""
 
+import html as _html
+def _txt(s):
+    """Descodifica entidades HTML (&amp; → &) e limpa caracteres de controlo."""
+    return re.sub(r"[\x7f-\x9f]"," ", _html.unescape(str(s or ""))).strip()
+
 def _ent_limpa(lst, max_n=2):
     """['600052737 - Nome', ...] -> 'Nome | Nome2 (+N)'."""
     out=[]
     for s in (lst or []):
-        m=re.match(r"^\s*\d{9}\s*-\s*(.+)$", str(s))
-        out.append((m.group(1) if m else str(s)).strip())
+        s=_txt(s)
+        m=re.match(r"^\s*\d{9}\s*-\s*(.+)$", s)
+        out.append((m.group(1) if m else s).strip())
     if not out: return ""
     extra=f" (+{len(out)-max_n})" if len(out)>max_n else ""
     return " | ".join(out[:max_n])+extra
+
+def _conc_lista(lst, max_n=30):
+    """Lista de concorrentes -> nomes limpos. Aceita strings 'NIF-Nome' (ficheiro oficial)
+    ou dicts {'nif','description'} (API base.gov)."""
+    out=[]
+    for c in (lst or []):
+        if isinstance(c, dict):
+            s=_txt(c.get("description"))
+        else:
+            s=_txt(c)
+            m=re.match(r"^\s*\d{9}\s*-\s*(.+)$", s)
+            if m: s=m.group(1).strip()
+        if s: out.append(s[:70])
+    if len(out)>max_n:
+        resto=len(out)-max_n
+        out=out[:max_n]+[f"… e mais {resto}"]
+    return out
 
 def _preco_eur(s):
     if s in (None,""): return None
@@ -433,7 +456,7 @@ def contratos_oficial(ano, corte):
     for r in recs:
         dp=iso(r.get("dataPublicacao",""))
         if not dp or dp<corte: continue
-        obj=re.sub(r"[\x7f-\x9f]"," ",(r.get("objectoContrato") or r.get("descContrato") or "")).strip()
+        obj=_txt(r.get("objectoContrato") or r.get("descContrato"))
         cpvs=r.get("cpv") or []
         tipos=r.get("tipoContrato") or []
         loc,dist=ctr_local(r.get("localExecucao"))
@@ -444,7 +467,8 @@ def contratos_oficial(ano, corte):
             "obj":obj[:300],"preco":preco,"cpv":[str(c)[:80] for c in cpvs[:2]],
             "tipo":" / ".join(str(t) for t in tipos)[:80],"proc":r.get("tipoprocedimento"),
             "prazo":r.get("prazoExecucao"),"cel":iso(r.get("dataCelebracaoContrato","") or "") or "",
-            "cat":_ctr_cat(obj,cpvs,tipos),"local":loc[:90],"dist":dist,"url":_ctr_url(r.get("idcontrato"))})
+            "cat":_ctr_cat(obj,cpvs,tipos),"local":loc[:90],"dist":dist,
+            "conc":_conc_lista(r.get("concorrentes")),"url":_ctr_url(r.get("idcontrato"))})
     return out
 
 def _base_post(data, timeout=60):
@@ -479,12 +503,12 @@ def contratos_vivo(desde, max_det=600, max_pag=80):
                 antigos+=1; continue
             cid=it.get("id")
             b={"n":cid,"data":dp,
-               "ent":(it.get("contracting") or "").strip(),"adj":(it.get("contracted") or "").strip(),
-               "obj":re.sub(r"[\x7f-\x9f]"," ",(it.get("objectBriefDescription") or "")).strip()[:300],
+               "ent":_txt(it.get("contracting")),"adj":_txt(it.get("contracted")),
+               "obj":_txt(it.get("objectBriefDescription"))[:300],
                "preco":_preco_eur(it.get("initialContractualPrice")),
                "cpv":[],"tipo":"","proc":it.get("contractingProcedureType"),
                "prazo":"","cel":iso2(it.get("signingDate","") or ""),
-               "cat":"","local":"","dist":"","url":_ctr_url(cid)}
+               "cat":"","local":"","dist":"","conc":[],"url":_ctr_url(cid)}
             if ndet<max_det:
                 try:
                     det=_base_post({"type":"detail_contratos","version":"91.0","id":cid}); ndet+=1
@@ -493,6 +517,7 @@ def contratos_vivo(desde, max_det=600, max_pag=80):
                     b["prazo"]=re.sub(r"\D","",str(det.get("executionDeadline") or "")) or ""
                     loc,dist=ctr_local([det.get("executionPlace") or ""])
                     b["local"]=loc[:90]; b["dist"]=dist
+                    b["conc"]=_conc_lista(det.get("contestants") or det.get("invitees"))
                 except Exception: pass
             b["cat"]=_ctr_cat(b["obj"], b["cpv"], [b["tipo"]] if b["tipo"] else [])
             out.append(b)

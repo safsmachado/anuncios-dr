@@ -309,7 +309,7 @@
 </main>
 
 <script>
-const APP_VER="9.1";        // versão da aplicação (mostrada no canto superior direito)
+const APP_VER="9.2";        // versão da aplicação (mostrada no canto superior direito)
 let META={ver:"",gerado:"",hora:"",de:"",ate:"",janela:120,n:0};
 const CATS=["Obras","Serviços","Serviços de fiscalização","Serviços de projeto","Fornecimento de bens","Concessões","Alterações de procedimento","Outros"];
 const CLS={"Obras":"Obras","Serviços":"Servicos","Serviços de fiscalização":"Fiscalizacao","Serviços de projeto":"Projeto","Fornecimento de bens":"Fornecimento","Concessões":"Concessoes","Alterações de procedimento":"Alteracoes","Outros":"Outros"};
@@ -1019,7 +1019,7 @@ function cFiltrados(){
     if(CF.vmin!=null && !(r.preco>=CF.vmin)) return false;
     if(CF.vmax!=null && !(r.preco<=CF.vmax)) return false;
     if(termos.length){
-      const blob=[r.n,r.ent,r.adj,r.obj,r.proc,r.tipo,r.local,r.dist,(r.cpv||[]).join(" ")].join(" ").toLowerCase();
+      const blob=[r.n,r.ent,r.adj,r.obj,r.proc,r.tipo,r.local,r.dist,(r.cpv||[]).join(" "),(r.conc||[]).join(" ")].join(" ").toLowerCase();
       if(!termos.every(t=>blob.includes(t))) return false;
     }
     return true;
@@ -1035,6 +1035,9 @@ function cOrdenar(arr){
 }
 function cDetGrid(r){
   const li=(t,v)=>v?`<div><b>${t}</b><div>${v}</div></div>`:"";
+  const conc=(r.conc&&r.conc.length)
+    ? `<div class="full"><b>Concorrentes ao procedimento (${r.conc.length})</b><div>${r.conc.map(c=>esc(c)).join(" · ")}</div></div>`
+    : `<div class="full"><b>Concorrentes ao procedimento</b><div>— sem lista publicada no BASE (habitual em ajustes diretos) —</div></div>`;
   return `<div class="det-grid">`+
     li("Objeto do contrato", esc(r.obj||"—"))+
     li("Adjudicante", esc(r.ent||"—"))+
@@ -1048,6 +1051,7 @@ function cDetGrid(r){
     li("Data de celebração", r.cel?dmy(r.cel):"—")+
     li("Prazo de execução", r.prazo?esc(r.prazo)+" dias":"—")+
     li("Ficha no Portal BASE", r.url?`<a class="dr" href="${esc(r.url)}" target="_blank" rel="noopener">Abrir no BASE ↗</a>`:"—")+
+    conc+
     `</div>`;
 }
 function cLinha(r){
