@@ -4,7 +4,7 @@
 # Fonte 2: Diário da República (site) via Playwright — dias mais recentes.
 import json, gzip, datetime, urllib.request, sys, os, re, asyncio
 
-VERSAO = "9.2"          # versão da app/dados (aparece na página)
+VERSAO = "9.3"          # versão da app/dados (aparece na página)
 DATASET_ID = "66d72fbc58cd7a63dae28712"
 JANELA_DIAS = 120
 CTR_DATASET = "66d72d488ca4b7cb2de28712"   # Contratos Públicos - Portal BASE - IMPIC (contratos{ano}.zip)
@@ -475,7 +475,7 @@ def _base_post(data, timeout=60):
     import urllib.parse, time
     body=urllib.parse.urlencode(data).encode()
     last=None
-    for t in range(3):
+    for t in range(2):
         try:
             req=urllib.request.Request("https://www.base.gov.pt/Base4/pt/resultados/", data=body,
                 headers={"User-Agent":"Mozilla/5.0","Content-Type":"application/x-www-form-urlencoded; charset=UTF-8"})
@@ -485,7 +485,57 @@ def _base_post(data, timeout=60):
             last=e; time.sleep(2*(t+1))
     raise last
 
-def contratos_vivo(desde, max_det=600, max_pag=80):
+# O base.gov.pt pode bloquear pedidos diretos vindos dos servidores do GitHub (como o DR).
+# Fallback: fazer o mesmo pedido DENTRO de um browser (Playwright/Chromium), que não é bloqueado.
+_PW=None; _PW_PG=None; _MODO_BASE="urllib"
+def _pw_pagina():
+    global _PW,_PW_PG
+    if _PW_PG is None:
+        from playwright.sync_api import sync_playwright
+        _PW=sync_playwright().start()
+        opts={"args":["--disable-blink-features=AutomationControlled"]}
+        prox=os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
+        if prox: opts["proxy"]={"server":prox}     # ambientes com proxy (no GitHub não há)
+        nav=_PW.chromium.launch(**opts)
+        pg=nav.new_page(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+                        ignore_https_errors=bool(prox))
+        pg.goto("https://www.base.gov.pt/Base4/pt/pesquisa/", wait_until="domcontentloaded", timeout=90000)
+        pg.wait_for_timeout(1500)
+        _PW_PG=pg
+    return _PW_PG
+
+def _pw_fechar():
+    global _PW,_PW_PG
+    try:
+        if _PW: _PW.stop()
+    except Exception: pass
+    _PW=None; _PW_PG=None
+
+def _base_post_pw(data, timeout=60):
+    import urllib.parse
+    pg=_pw_pagina()
+    body=urllib.parse.urlencode(data)
+    txt=pg.evaluate("""async (arg)=>{
+        const [body,tmo]=arg;
+        const ctl=new AbortController(); setTimeout(()=>ctl.abort(), tmo);
+        const r=await fetch('/Base4/pt/resultados/',{method:'POST',signal:ctl.signal,
+          headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'},body});
+        return await r.text();
+    }""", [body, timeout*1000])
+    return json.loads(txt)
+
+def _base_call(data, timeout=60):
+    """Tenta urllib; se falhar (bloqueio no GitHub), muda para o browser e fica assim."""
+    global _MODO_BASE
+    if _MODO_BASE=="urllib":
+        try:
+            return _base_post(data, timeout)
+        except Exception as e:
+            log("base.gov direto falhou — a mudar para browser:", repr(e))
+            _MODO_BASE="browser"
+    return _base_post_pw(data, timeout)
+
+def contratos_vivo(desde, max_det=600, max_pag=200):
     """Contratos publicados a partir de «desde» (dias em falta depois do ficheiro oficial),
     via pesquisa do base.gov.pt SEM filtro de datas (com filtro o servidor demora ~20-30s por página;
     sem filtro demora ~1-2s). Varre por ordem -publicationDate e pára ao chegar a dias já cobertos.
@@ -493,7 +543,7 @@ def contratos_vivo(desde, max_det=600, max_pag=80):
     out=[]; ndet=0
     q="tipo=0&tipocontrato=0&pais=187&distrito=0&concelho=0"
     for page in range(max_pag):
-        d=_base_post({"type":"search_contratos","version":"91.0","query":q,"sort":"-publicationDate","page":page,"size":50})
+        d=_base_call({"type":"search_contratos","version":"91.0","query":q,"sort":"-publicationDate","page":page,"size":50})
         items=d.get("items") or []
         if not items: break
         antigos=0
@@ -511,7 +561,7 @@ def contratos_vivo(desde, max_det=600, max_pag=80):
                "cat":"","local":"","dist":"","conc":[],"url":_ctr_url(cid)}
             if ndet<max_det:
                 try:
-                    det=_base_post({"type":"detail_contratos","version":"91.0","id":cid}); ndet+=1
+                    det=_base_call({"type":"detail_contratos","version":"91.0","id":cid}); ndet+=1
                     if det.get("cpvs"): b["cpv"]=[f"{det.get('cpvs')} - {det.get('cpvsDesignation') or ''}".strip(" -")[:80]]
                     b["tipo"]=(det.get("contractTypes") or "")[:80]
                     b["prazo"]=re.sub(r"\D","",str(det.get("executionDeadline") or "")) or ""
@@ -538,14 +588,17 @@ def gerar_contratos(hoje):
             ctr+=parte
         except Exception as e:
             log(f"contratos oficial {ano} falhou:", repr(e))
-    # complemento ao vivo para os dias em falta (normalmente só hoje)
+    # complemento ao vivo para os dias em falta (normalmente só hoje; até 6 dias se o oficial parar)
     try:
         maxc=max((r["data"] for r in ctr if r.get("data")), default=None)
         ini=(datetime.date.fromisoformat(maxc)+datetime.timedelta(days=1)) if maxc else (hoje-datetime.timedelta(days=2))
         if ini<=hoje:
-            ctr+=contratos_vivo(max(ini,hoje-datetime.timedelta(days=3)).isoformat())
+            ctr+=contratos_vivo(max(ini,hoje-datetime.timedelta(days=6)).isoformat())
     except Exception as e:
         log("contratos vivo indisponível:", repr(e))
+    finally:
+        _pw_fechar()
+    log(f"contratos: transporte base.gov = {_MODO_BASE}")
     if not ctr:
         log("contratos: nada obtido — contratos.json.gz não escrito"); return
     ultimo=max(r["data"] for r in ctr if r["data"])
