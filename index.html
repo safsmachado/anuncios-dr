@@ -177,6 +177,14 @@
   .obs-caixa textarea{width:100%;min-height:64px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;
     font-family:inherit;font-size:13px;resize:vertical;background:#fffdf3}
   .obs-caixa .estado-obs{font-size:11.5px;color:var(--muted);margin-top:3px}
+  /* alterar a marcação e reenviar para verificação, dentro do detalhe do anúncio */
+  .det-marc{grid-column:1/-1;background:#fffdf3;border:1px solid #e6dfc4;border-radius:8px;padding:10px 12px}
+  .det-marc .det-mk{display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+  .det-marc .det-mk .mk{font-size:16px;padding:5px 9px}
+  .det-marc .det-mk .mk.on{padding:4px 8px}
+  .det-marc .det-est{font-size:12.5px;color:#333;margin-left:6px}
+  .det-marc .det-vbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  .det-marc .det-vinfo{font-size:12px;color:var(--muted);margin-top:6px}
   #vazio,#cVazio{padding:40px;text-align:center;color:var(--muted);background:#fff;border:1px solid var(--line);border-radius:10px;margin-top:14px}
   .nota{margin-top:16px;font-size:12.5px;color:var(--muted);line-height:1.55}
   /* separadores Anúncios / Contratos */
@@ -309,7 +317,7 @@
 </main>
 
 <script>
-const APP_VER="9.3";        // versão da aplicação (mostrada no canto superior direito)
+const APP_VER="9.4";        // versão da aplicação (mostrada no canto superior direito)
 let META={ver:"",gerado:"",hora:"",de:"",ate:"",janela:120,n:0};
 const CATS=["Obras","Serviços","Serviços de fiscalização","Serviços de projeto","Fornecimento de bens","Concessões","Alterações de procedimento","Outros"];
 const CLS={"Obras":"Obras","Serviços":"Servicos","Serviços de fiscalização":"Fiscalizacao","Serviços de projeto":"Projeto","Fornecimento de bens":"Fornecimento","Concessões":"Concessoes","Alterações de procedimento":"Alteracoes","Outros":"Outros"};
@@ -411,6 +419,7 @@ function _emailAberto(){
 function feitosDe(quem){ return ordAnun(anunMarcados().filter(r=>assinou(quem,r.n))); }
 let SELV=new Set();          // seleção (caixas) no quadro de email
 let SELP=new Set();          // seleção (caixas) na lista «por verificar»
+let PVDET=new Set();         // detalhes abertos no painel de verificação (ficam abertos ao mudar a marcação)
 /* Verificar/Aprovar: SÓ assina e mete o anúncio no quadro de seleção de email (NÃO envia já).
    O email só sai depois, pelo botão «Enviar email dos selecionados». */
 function acaoAnuncios(regs, aprov){
@@ -490,6 +499,12 @@ function linhaPV(r, modo){
     `${r.pdf?`<a class="dr" href="${esc(r.pdf)}" target="_blank" rel="noopener">DR ↗</a>`:""}`+
     btns+`</div>`;
 }
+/* linha + detalhe (se estiver aberto) — o detalhe fica aberto mesmo depois de mudar a marcação */
+function linhaPVd(r, modo){
+  const l=linhaPV(r,modo);
+  if(!PVDET.has(String(r.n))) return l;
+  return l+`<div class="pv-det" data-det="${esc(r.n)}">${detGridHTML(r)}</div>`;
+}
 function renderVerif(){
   const sem=document.getElementById("semaforo");
   const pv=document.getElementById("painelVerif"); if(!pv) return;
@@ -524,7 +539,7 @@ function renderVerif(){
     lista=`<div class="pv-selbar"><span class="ajuda">Marque as caixas e:</span> `+
       `<button class="acao vbtn" data-vsel="1">Verificar selecionados</button> `+
       `<button class="acao vbtn vbtn-ap" data-asel="1">Aprovar selecionados</button></div>`+
-      `<div class="pv-lista">${pend.map(r=>linhaPV(r,"pend")).join("")}</div>`;
+      `<div class="pv-lista">${pend.map(r=>linhaPVd(r,"pend")).join("")}</div>`;
   }
 
   // quadro de seleção para envio de email (verificados/aprovados por mim)
@@ -535,14 +550,14 @@ function renderVerif(){
       `<button class="acao vbtn" data-seltodos="1">Selecionar todos</button> `+
       `<button class="acao vbtn" data-selnenhum="1">Nenhum</button> `+
       `<button class="acao primario vbtn" data-enviar="1">✉ Enviar email dos selecionados (${nSel})</button>`+
-      `</div><div class="pv-lista">${feitos.map(r=>linhaPV(r,"feito")).join("")}</div></div>`;
+      `</div><div class="pv-lista">${feitos.map(r=>linhaPVd(r,"feito")).join("")}</div></div>`;
   }
 
   const fech=anunFechados();
   let fechHtml="";
   if(fech.length){
     fechHtml=`<div class="v-fech"><button class="v-fechtog" data-tog="1">${mostrarFechadosV?"▾":"▸"} Anúncios fechados (${fech.length})</button>`;
-    if(mostrarFechadosV) fechHtml+=`<div class="pv-lista" style="margin-top:5px">${fech.map(r=>linhaPV(r,"fech")).join("")}</div>`;
+    if(mostrarFechadosV) fechHtml+=`<div class="pv-lista" style="margin-top:5px">${fech.map(r=>linhaPVd(r,"fech")).join("")}</div>`;
     fechHtml+=`</div>`;
   }
 
@@ -557,10 +572,13 @@ function renderVerif(){
   pv.querySelectorAll("[data-p]").forEach(c=>c.onchange=()=>{ const n=String(c.dataset.p); if(c.checked)SELP.add(n); else SELP.delete(n); });
   pv.querySelectorAll("[data-sel]").forEach(c=>c.onchange=()=>{ const n=String(c.dataset.sel); if(c.checked)SELV.add(n); else SELV.delete(n); const b=pv.querySelector("[data-enviar]"); if(b) b.textContent=`✉ Enviar email dos selecionados (${feitosDe(EU).filter(r=>SELV.has(String(r.n))).length})`; });
   pv.querySelectorAll("[data-open]").forEach(el=>el.onclick=()=>{
-    const linha=el.closest(".pv-linha"); const nx=linha.nextElementSibling;
-    if(nx&&nx.classList.contains("pv-det")){ nx.remove(); return; }
-    const r=REGS.find(x=>String(x.n)===el.dataset.open); if(!r) return;
-    const div=document.createElement("div"); div.className="pv-det"; div.innerHTML=detGridHTML(r); linha.after(div); wireObs(div,r);
+    const n=String(el.dataset.open);
+    if(PVDET.has(n)) PVDET.delete(n); else PVDET.add(n);
+    renderVerif();
+  });
+  // detalhes abertos: observações + alterar marcação + reenviar para verificação
+  pv.querySelectorAll(".pv-det[data-det]").forEach(d=>{
+    const r=REGS.find(x=>String(x.n)===d.dataset.det); if(r) wireDet(d,r);
   });
   const vt=pv.querySelector("[data-vtudo]"); if(vt) vt.onclick=()=>verificarAnuncios(pend);
   const at=pv.querySelector("[data-atudo]"); if(at) at.onclick=()=>aprovarAnuncios(pend);
@@ -807,7 +825,7 @@ function render(){
       const campo=th.dataset.o; if(ordCampo===campo) ordDir*=-1; else {ordCampo=campo; ordDir=1;} render();
     });
     const tb=div.querySelector("tbody");
-    doGrupo.forEach(r=>tb.appendChild(linha(r)));
+    doGrupo.forEach(r=>{ const tr=linha(r); tb.appendChild(tr); if(TBDET.has(String(r.n))) abrirDetalhe(tr,r); });
     cont.appendChild(div);
   });
   document.getElementById("vazio").style.display=algum?"none":"block";
@@ -869,6 +887,31 @@ function detGridHTML(r){
       <textarea placeholder="notas sobre este concurso…">${esc(a.obs||"")}</textarea>
       <div class="estado-obs"></div>
     </div>
+    ${detMarcHTML(r)}
+  </div>`;
+}
+/* bloco «alterar marcação e reenviar para verificação» dentro do detalhe */
+function detMarcHTML(r){
+  const a=anot(r.n);
+  const v=verOf(r.n)[EU];
+  let info;
+  if(assinou(EU,r.n)) info=`Estado: <b>${v&&v.aprov?"APROVADO":"VERIFICADO"} por si</b> — está no quadro «Para email».`;
+  else if(v) info=`Estado: <b>alterado depois da sua ${v.aprov?"aprovação":"verificação"}</b> — voltou a «por verificar». Carregue em Verificar ou Aprovado para reenviar.`;
+  else info=`Estado: <b>por verificar por si</b>.`;
+  return `<div class="det-marc">
+    <b>Marcação — pode alterar aqui e reenviar para verificação</b>
+    <div class="det-mk">
+      <button class="mk mk-analisar ${a.estado==="analisar"?"on":""}" data-de="analisar" title="A analisar">🔍</button>
+      <button class="mk mk-concorrer ${a.estado==="concorrer"?"on":""}" data-de="concorrer" title="A concorrer">✅</button>
+      <button class="mk mk-descartado ${a.estado==="descartado"?"on":""}" data-de="descartado" title="Descartar">✖</button>
+      <button class="mk mk-decl ${a.decl?"on":""}" data-dd="1" title="Declaração de participação enviada">📨</button>
+      <span class="det-est">${estBadge(a.estado)}${a.decl?" <span class='pill'>declaração enviada</span>":""}</span>
+    </div>
+    <div class="det-vbar">
+      <button class="acao primario vbtn" data-dv="1">Verificar → quadro de email</button>
+      <button class="acao vbtn vbtn-ap" data-da="1">Aprovado → quadro de email</button>
+    </div>
+    <div class="det-vinfo">${info}</div>
   </div>`;
 }
 function wireObs(cont,r){
@@ -876,13 +919,32 @@ function wireObs(cont,r){
   const est=cont.querySelector(".estado-obs");
   ta.oninput=()=>{ setObs(r.n,ta.value); if(est){ est.textContent="guardado ✓"; setTimeout(()=>est.textContent="",1200); } };
 }
-function toggleDetalhe(tr,r){
-  if(tr.nextSibling && tr.nextSibling.classList && tr.nextSibling.classList.contains("detalhe")){ tr.nextSibling.remove(); return; }
+/* liga observações + botões de marcação/verificação do detalhe (tabela e painel) */
+function wireDet(cont,r){
+  wireObs(cont,r);
+  cont.querySelectorAll(".mk[data-de]").forEach(b=>b.onclick=e=>{
+    e.stopPropagation(); const est=b.dataset.de;
+    setEstado(r.n, anot(r.n).estado===est?"":est); render();
+  });
+  const bd=cont.querySelector(".mk[data-dd]");
+  if(bd) bd.onclick=e=>{ e.stopPropagation(); setDecl(r.n, anot(r.n).decl?0:1); render(); };
+  const bv=cont.querySelector("[data-dv]");
+  if(bv) bv.onclick=e=>{ e.stopPropagation(); verificarAnuncios([r]); };
+  const ba=cont.querySelector("[data-da]");
+  if(ba) ba.onclick=e=>{ e.stopPropagation(); aprovarAnuncios([r]); };
+}
+let TBDET=new Set();   // detalhes abertos na tabela (para não fecharem ao mudar a marcação)
+function abrirDetalhe(tr,r){
   const d=document.createElement("tr");
   d.className="detalhe";
   d.innerHTML=`<td colspan="8">${detGridHTML(r)}</td>`;
-  wireObs(d,r);
+  wireDet(d,r);
   tr.after(d);
+}
+function toggleDetalhe(tr,r){
+  if(tr.nextSibling && tr.nextSibling.classList && tr.nextSibling.classList.contains("detalhe")){ tr.nextSibling.remove(); TBDET.delete(String(r.n)); return; }
+  TBDET.add(String(r.n));
+  abrirDetalhe(tr,r);
 }
 
 /* ---------- exportação ---------- */
@@ -985,7 +1047,7 @@ async function carregarContratos(){
   }else{ txt=new TextDecoder().decode(buf); }
   const obj=JSON.parse(txt);
   CREGS=obj.regs||[];
-  CMETA={ver:obj.ver||"",gerado:obj.gerado||"",hora:obj.hora||"",de:obj.de||"",ate:obj.ate||"",janela:obj.janela||30,n:CREGS.length};
+  CMETA={ver:obj.ver||"",gerado:obj.gerado||"",hora:obj.hora||"",de:obj.de||"",ate:obj.ate||"",janela:obj.janela||30,diag:obj.diag||"",n:CREGS.length};
 }
 
 function cDatasMinMax(){ const d=[...new Set(CREGS.map(r=>r.data))].sort(); return d.length?{min:d[0],max:d[d.length-1]}:{min:null,max:null}; }
@@ -1078,8 +1140,13 @@ function cLinha(r){
 function cStatusTxt(){
   const st=document.getElementById("cStatus"); if(!st) return;
   const {max}=cDatasMinMax();
-  st.textContent=`${CREGS.length} contratos · ${dmy(CMETA.de)}–${dmy(max)} · fonte Portal BASE/IMPIC`+
+  const txt=`${CREGS.length} contratos · ${dmy(CMETA.de)}–${dmy(max)} · fonte Portal BASE/IMPIC`+
     (CMETA.gerado?` · atualizado ${dmy(CMETA.gerado)}${CMETA.hora?" "+CMETA.hora:""}`:``);
+  // se os contratos estiverem atrasados, mostrar aqui o porquê (diagnóstico enviado pelo robô)
+  const hj=new Date(); hj.setHours(0,0,0,0);
+  const atraso=max?Math.round((hj-new Date(max+"T00:00:00"))/86400000):999;
+  st.innerHTML=esc(txt)+((atraso>=2&&CMETA.diag)?
+    `<div style="margin-top:5px;color:#b3540a;font-size:12px;line-height:1.5">⚠ contratos com ${atraso} dias de atraso — diagnóstico do robô: ${esc(CMETA.diag)}</div>`:``);
 }
 function cRender(){
   if(!cCarregado) return;

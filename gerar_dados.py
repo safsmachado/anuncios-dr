@@ -4,7 +4,7 @@
 # Fonte 2: Diário da República (site) via Playwright — dias mais recentes.
 import json, gzip, datetime, urllib.request, sys, os, re, asyncio
 
-VERSAO = "9.3"          # versão da app/dados (aparece na página)
+VERSAO = "9.4"          # versão da app/dados (aparece na página)
 DATASET_ID = "66d72fbc58cd7a63dae28712"
 JANELA_DIAS = 120
 CTR_DATASET = "66d72d488ca4b7cb2de28712"   # Contratos Públicos - Portal BASE - IMPIC (contratos{ano}.zip)
@@ -471,23 +471,41 @@ def contratos_oficial(ano, corte):
             "conc":_conc_lista(r.get("concorrentes")),"url":_ctr_url(r.get("idcontrato"))})
     return out
 
-def _base_post(data, timeout=60):
+CTR_DIAG=[]                      # notas de diagnóstico que vão para dentro do contratos.json.gz
+def _diag(msg):
+    CTR_DIAG.append(str(msg)[:180]); log("diag contratos:", msg)
+
+_UA_REAL=("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+# cabeçalhos como os de um browser real (o base.gov.pt pode recusar pedidos "nus")
+_H_SIMPLES={"User-Agent":"Mozilla/5.0","Content-Type":"application/x-www-form-urlencoded; charset=UTF-8"}
+_H_BROWSER={"User-Agent":_UA_REAL,
+    "Content-Type":"application/x-www-form-urlencoded; charset=UTF-8",
+    "Accept":"application/json, text/javascript, */*; q=0.01",
+    "Accept-Language":"pt-PT,pt;q=0.9,en;q=0.8",
+    "X-Requested-With":"XMLHttpRequest",
+    "Origin":"https://www.base.gov.pt",
+    "Referer":"https://www.base.gov.pt/Base4/pt/pesquisa/",
+    "Connection":"keep-alive"}
+
+def _base_post(data, timeout=30, headers=None, tentativas=2):
     import urllib.parse, time
     body=urllib.parse.urlencode(data).encode()
     last=None
-    for t in range(2):
+    for t in range(tentativas):
         try:
             req=urllib.request.Request("https://www.base.gov.pt/Base4/pt/resultados/", data=body,
-                headers={"User-Agent":"Mozilla/5.0","Content-Type":"application/x-www-form-urlencoded; charset=UTF-8"})
+                headers=headers or _H_SIMPLES)
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 return json.loads(r.read().decode("utf-8"))
         except Exception as e:
-            last=e; time.sleep(2*(t+1))
+            last=e
+            if t+1<tentativas: time.sleep(2*(t+1))
     raise last
 
 # O base.gov.pt pode bloquear pedidos diretos vindos dos servidores do GitHub (como o DR).
 # Fallback: fazer o mesmo pedido DENTRO de um browser (Playwright/Chromium), que não é bloqueado.
-_PW=None; _PW_PG=None; _MODO_BASE="urllib"
+_PW=None; _PW_PG=None; _MODO_BASE="simples"
 def _pw_pagina():
     global _PW,_PW_PG
     if _PW_PG is None:
@@ -524,27 +542,46 @@ def _base_post_pw(data, timeout=60):
     }""", [body, timeout*1000])
     return json.loads(txt)
 
-def _base_call(data, timeout=60):
-    """Tenta urllib; se falhar (bloqueio no GitHub), muda para o browser e fica assim."""
-    global _MODO_BASE
-    if _MODO_BASE=="urllib":
+_MODOS=[("simples", lambda d,t: _base_post(d,t,_H_SIMPLES)),
+        ("browser-headers", lambda d,t: _base_post(d,t,_H_BROWSER)),
+        ("chromium", lambda d,t: _base_post_pw(d,t))]
+_MODO_I=0
+def _base_call(data, timeout=30):
+    """Tenta cada transporte por ordem até um funcionar; guarda o que funcionou.
+    (No GitHub o base.gov.pt pode recusar pedidos diretos, como acontece com o DR.)"""
+    global _MODO_I,_MODO_BASE
+    erros=[]
+    for i in range(_MODO_I, len(_MODOS)):
+        nome,fn=_MODOS[i]
         try:
-            return _base_post(data, timeout)
+            r=fn(data, timeout)
+            if _MODO_I!=i or _MODO_BASE!=nome:
+                _diag(f"transporte «{nome}» OK"+(f" (falharam: {'; '.join(erros)})" if erros else ""))
+            _MODO_I=i; _MODO_BASE=nome
+            return r
         except Exception as e:
-            log("base.gov direto falhou — a mudar para browser:", repr(e))
-            _MODO_BASE="browser"
-    return _base_post_pw(data, timeout)
+            erros.append(f"{nome}={type(e).__name__} {str(e)[:60]}")
+    _diag("todos os transportes falharam: "+" | ".join(erros))
+    raise RuntimeError("base.gov.pt inacessível: "+" | ".join(erros))
 
-def contratos_vivo(desde, max_det=600, max_pag=200):
+def contratos_vivo(desde, max_det=500, max_pag=200, seg_busca=600, seg_det=780):
     """Contratos publicados a partir de «desde» (dias em falta depois do ficheiro oficial),
     via pesquisa do base.gov.pt SEM filtro de datas (com filtro o servidor demora ~20-30s por página;
     sem filtro demora ~1-2s). Varre por ordem -publicationDate e pára ao chegar a dias já cobertos.
     Para cada contrato pede o detalhe (local de execução, CPV, tipo) — limitado a max_det pedidos."""
-    out=[]; ndet=0
+    import time
+    t0=time.time()
+    out=[]; ndet=0; vistos_1a=[]
     q="tipo=0&tipocontrato=0&pais=187&distrito=0&concelho=0"
+    # 1ª fase — varrer as páginas de resultados (rápido); sem detalhes, para nunca ficar sem contratos
     for page in range(max_pag):
+        if time.time()-t0>seg_busca:
+            _diag(f"busca ao vivo parada por tempo ({int(time.time()-t0)}s) na página {page}"); break
         d=_base_call({"type":"search_contratos","version":"91.0","query":q,"sort":"-publicationDate","page":page,"size":50})
         items=d.get("items") or []
+        if page==0:
+            vistos_1a=[iso2(x.get("publicationDate","")) or "?" for x in items[:3]]
+            _diag(f"base.gov respondeu: total={d.get('total')}, 1ª página começa em {', '.join(vistos_1a) or '(vazia)'} (procuro >= {desde})")
         if not items: break
         antigos=0
         for it in items:
@@ -552,28 +589,32 @@ def contratos_vivo(desde, max_det=600, max_pag=200):
             if not dp or dp<desde:
                 antigos+=1; continue
             cid=it.get("id")
-            b={"n":cid,"data":dp,
+            out.append({"n":cid,"data":dp,
                "ent":_txt(it.get("contracting")),"adj":_txt(it.get("contracted")),
                "obj":_txt(it.get("objectBriefDescription"))[:300],
                "preco":_preco_eur(it.get("initialContractualPrice")),
                "cpv":[],"tipo":"","proc":it.get("contractingProcedureType"),
                "prazo":"","cel":iso2(it.get("signingDate","") or ""),
-               "cat":"","local":"","dist":"","conc":[],"url":_ctr_url(cid)}
-            if ndet<max_det:
-                try:
-                    det=_base_call({"type":"detail_contratos","version":"91.0","id":cid}); ndet+=1
-                    if det.get("cpvs"): b["cpv"]=[f"{det.get('cpvs')} - {det.get('cpvsDesignation') or ''}".strip(" -")[:80]]
-                    b["tipo"]=(det.get("contractTypes") or "")[:80]
-                    b["prazo"]=re.sub(r"\D","",str(det.get("executionDeadline") or "")) or ""
-                    loc,dist=ctr_local([det.get("executionPlace") or ""])
-                    b["local"]=loc[:90]; b["dist"]=dist
-                    b["conc"]=_conc_lista(det.get("contestants") or det.get("invitees"))
-                except Exception: pass
-            b["cat"]=_ctr_cat(b["obj"], b["cpv"], [b["tipo"]] if b["tipo"] else [])
-            out.append(b)
-        if page%10==0: log(f"contratos vivo: página {page}, acumulado {len(out)} (detalhes {ndet})")
+               "cat":_ctr_cat(_txt(it.get("objectBriefDescription")), [], []),
+               "local":"","dist":"","conc":[],"url":_ctr_url(cid)})
+        if page%10==0: log(f"contratos vivo: página {page}, acumulado {len(out)}")
         if antigos==len(items): break    # página inteira já antes de «desde» ⇒ terminámos
-    log(f"contratos vivo: {len(out)} contratos desde {desde} (detalhes {ndet})")
+    # 2ª fase — detalhes (local de execução, CPV, tipo, CONCORRENTES), do mais recente para trás
+    for b in sorted(out, key=lambda x:(x["data"], str(x["n"])), reverse=True):
+        if ndet>=max_det or time.time()-t0>seg_det: break
+        try:
+            det=_base_call({"type":"detail_contratos","version":"91.0","id":b["n"]}); ndet+=1
+            if det.get("cpvs"): b["cpv"]=[f"{det.get('cpvs')} - {det.get('cpvsDesignation') or ''}".strip(" -")[:80]]
+            b["tipo"]=(det.get("contractTypes") or "")[:80]
+            b["prazo"]=re.sub(r"\D","",str(det.get("executionDeadline") or "")) or ""
+            loc,dist=ctr_local([det.get("executionPlace") or ""])
+            b["local"]=loc[:90]; b["dist"]=dist
+            b["conc"]=_conc_lista(det.get("contestants") or det.get("invitees"))
+            b["cat"]=_ctr_cat(b["obj"], b["cpv"], [b["tipo"]] if b["tipo"] else [])
+        except Exception as e:
+            if ndet==0: _diag(f"detalhes indisponíveis: {type(e).__name__}")
+            break
+    _diag(f"ao vivo: +{len(out)} contratos desde {desde} ({ndet} com detalhe, {int(time.time()-t0)}s)")
     return out
 
 def gerar_contratos(hoje):
@@ -588,14 +629,17 @@ def gerar_contratos(hoje):
             ctr+=parte
         except Exception as e:
             log(f"contratos oficial {ano} falhou:", repr(e))
-    # complemento ao vivo para os dias em falta (normalmente só hoje; até 6 dias se o oficial parar)
+    maxof=max((r["data"] for r in ctr if r.get("data")), default=None)
+    if maxof: _diag(f"ficheiro oficial IMPIC vai até {maxof}")
+    # complemento ao vivo para os dias em falta (normalmente só hoje; até 10 dias se o oficial parar)
     try:
-        maxc=max((r["data"] for r in ctr if r.get("data")), default=None)
-        ini=(datetime.date.fromisoformat(maxc)+datetime.timedelta(days=1)) if maxc else (hoje-datetime.timedelta(days=2))
+        ini=(datetime.date.fromisoformat(maxof)+datetime.timedelta(days=1)) if maxof else (hoje-datetime.timedelta(days=2))
         if ini<=hoje:
-            ctr+=contratos_vivo(max(ini,hoje-datetime.timedelta(days=6)).isoformat())
+            ctr+=contratos_vivo(max(ini,hoje-datetime.timedelta(days=10)).isoformat())
+        else:
+            _diag("oficial já está em dia — sem complemento ao vivo")
     except Exception as e:
-        log("contratos vivo indisponível:", repr(e))
+        _diag(f"complemento ao vivo indisponível: {type(e).__name__} {str(e)[:100]}")
     finally:
         _pw_fechar()
     log(f"contratos: transporte base.gov = {_MODO_BASE}")
@@ -608,7 +652,8 @@ def gerar_contratos(hoje):
         if r.get("data") and r["data"]>=corte: porN.setdefault(r["n"], r)
     jan=sorted(porN.values(), key=lambda x:(x["data"], str(x["n"])))
     de=min(r["data"] for r in jan); ate=max(r["data"] for r in jan)
-    obj={"ver":VERSAO,"gerado":hoje.isoformat(),"hora":hora_lisboa(),"de":de,"ate":ate,"janela":JANELA_CTR,"regs":jan}
+    obj={"ver":VERSAO,"gerado":hoje.isoformat(),"hora":hora_lisboa(),"de":de,"ate":ate,"janela":JANELA_CTR,
+         "diag":" | ".join(CTR_DIAG[-8:]),"regs":jan}
     with gzip.open(os.path.join(os.path.dirname(os.path.abspath(__file__)),"contratos.json.gz"),"wb") as f:
         f.write(json.dumps(obj, ensure_ascii=False).encode("utf-8"))
     log(f"Escrito contratos.json.gz: {len(jan)} contratos, {de}..{ate}")
