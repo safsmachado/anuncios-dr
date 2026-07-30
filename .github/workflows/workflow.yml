@@ -1,0 +1,63 @@
+name: Atualizar e publicar Anúncios DR
+
+on:
+  schedule:
+    - cron: '0 6 * * *'    # ~07:00 Lisboa
+    - cron: '0 12 * * *'   # ~13:00 Lisboa
+    - cron: '0 16 * * *'   # ~17:00 Lisboa (apanha anúncios publicados durante a tarde)
+  workflow_dispatch:
+    inputs:
+      dia:
+        description: 'Importar contratos de um dia específico (aaaa-mm-dd). Vários dias: separar por vírgula. Deixar vazio = últimos 10 dias.'
+        required: false
+        default: ''
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70     # nunca fica pendurado mais de 70 min (contratos ao vivo podem demorar)
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Instalar Playwright + Chromium
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Gerar dados (oficial + DR)
+        env:
+          DIA_CTR: ${{ github.event.inputs.dia }}
+        run: python gerar_dados.py
+      - name: Preparar pasta do site
+        run: |
+          mkdir -p _site
+          cp index.html _site/index.html
+          cp dados.json.gz _site/dados.json.gz
+          # Se a fase dos contratos falhou, volta a publicar o ficheiro que já estava online.
+          # Sem isto, o acumulado de contratos perdia-se e tinha de ser recolhido tudo de novo.
+          if [ ! -f contratos.json.gz ]; then
+            echo "contratos.json.gz nao foi gerado - a recuperar o que ja esta publicado"
+            curl -sfL https://safsmachado.github.io/anuncios-dr/contratos.json.gz -o _rec.gz || true
+            if [ -s _rec.gz ] && gzip -t _rec.gz 2>/dev/null; then mv _rec.gz contratos.json.gz; else rm -f _rec.gz; fi
+          fi
+          if [ -f contratos.json.gz ]; then cp contratos.json.gz _site/contratos.json.gz; fi
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4
