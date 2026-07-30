@@ -193,6 +193,38 @@
     padding:9px 18px;border-radius:10px 10px 0 0;font-size:14px;font-weight:600;cursor:pointer}
   .aba.activa{background:#fff;color:var(--fg,#1c2733);box-shadow:0 -2px 0 var(--accent) inset}
   .grupo-cab.Contrato{background:#e8f1ea;color:#20613b}
+
+  /* ---------- v9.6: acabamentos visuais ---------- */
+  header{position:sticky;top:0;z-index:40;box-shadow:0 2px 6px rgba(15,35,70,.16)}
+  .ms-panel{z-index:60}
+  .painel{box-shadow:0 1px 2px rgba(20,30,50,.05)}
+  .tabela-wrap{box-shadow:0 1px 3px rgba(20,30,50,.06)}
+  button.acao,.cat-btn,.dia-btn,.cnt,.ms-btn,.aba,.cdia{transition:background .12s,border-color .12s,color .12s}
+  button.acao:active{transform:translateY(1px)}
+  .grupo-cab{transition:filter .12s}
+  .grupo-cab:hover{filter:brightness(.97)}
+  tr.linha:hover td{background:#eef5fd}
+  .aba:hover{background:#e4e8ef;color:var(--ink)}
+  #status,#cStatus{background:#fff;border:1px solid var(--line);border-radius:9px;padding:7px 12px}
+  .nota{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 15px}
+  /* barra de cobertura dos últimos 10 dias (separador Contratos) */
+  .cdias{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:8px 0 10px}
+  .cdias-t{font-size:12px;color:var(--muted)}
+  .cdia{border:1px solid var(--line);background:#fff;border-radius:9px;padding:4px 9px;font-size:11px;cursor:pointer;
+    display:flex;flex-direction:column;align-items:center;line-height:1.3;color:var(--muted);min-width:56px}
+  .cdia b{font-size:12.5px;color:var(--ink);font-variant-numeric:tabular-nums}
+  .cdia:hover{border-color:var(--accent)}
+  .cdia.activo{border-color:var(--accent);border-width:2px;background:var(--accent-soft);padding:3px 8px}
+  .cdia.falta{border-color:#f0c7bf;background:#fdf1ef}
+  .cdia.falta b{color:#b02a2a}
+  .cdia.fds{opacity:.5}
+  .cdias-av{width:100%;font-size:12px;color:var(--warn);line-height:1.5}
+  @media (max-width:820px){
+    main{padding:12px 12px 50px}
+    header{padding:10px 12px;position:static}
+    .painel{padding:9px 10px;gap:10px}
+    input[type=search]{min-width:180px}
+  }
 </style>
 </head>
 <body>
@@ -306,18 +338,19 @@
     </div>
 
     <div id="cStatus">A carregar os contratos…</div>
+    <div id="cDias" class="cdias"></div>
     <div id="cConteudo"></div>
     <div id="cVazio" style="display:none">Sem resultados para o período/filtros/pesquisa actuais.</div>
 
     <p class="nota">
-      <b>Contratos públicos celebrados</b>, publicados diariamente no Portal BASE (base.gov.pt). Clique no cabeçalho de um grupo para o minimizar/abrir; clique numa linha para ver toda a informação do contrato (adjudicatário, CPV, prazo, local de execução, datas). O link «BASE» abre a ficha oficial do contrato no portal. A lista guarda os <b>últimos 30 dias</b> de publicações; ao abrir mostra os últimos 3 dias.<br>
+      <b>Contratos públicos celebrados</b>, publicados diariamente no Portal BASE (base.gov.pt). Clique no cabeçalho de um grupo para o minimizar/abrir; clique numa linha para ver toda a informação do contrato (adjudicatário, CPV, prazo, local de execução, datas). O link «BASE» abre a ficha oficial do contrato no portal. A lista guarda os <b>últimos 30 dias</b> de publicações; ao abrir mostra os últimos 3 dias. A <b>barra de cobertura</b> por baixo mostra quantos contratos existem em cada um dos últimos 10 dias — clique num dia para ver só esse. Se algum dia útil aparecer a vermelho (sem contratos), pode mandar buscá-lo à mão: <b>GitHub → Actions → «Atualizar e publicar Anúncios DR» → «Run workflow»</b> e escrever a data (aaaa-mm-dd) no campo «dia».<br>
       <b>Fonte:</b> dados oficiais do Portal BASE / IMPIC (dados.gov.pt), completados ao dia com o próprio base.gov.pt.
     </p>
   </div><!-- /vistaContratos -->
 </main>
 
 <script>
-const APP_VER="9.4";        // versão da aplicação (mostrada no canto superior direito)
+const APP_VER="9.6";        // versão da aplicação (mostrada no canto superior direito)
 let META={ver:"",gerado:"",hora:"",de:"",ate:"",janela:120,n:0};
 const CATS=["Obras","Serviços","Serviços de fiscalização","Serviços de projeto","Fornecimento de bens","Concessões","Alterações de procedimento","Outros"];
 const CLS={"Obras":"Obras","Serviços":"Servicos","Serviços de fiscalização":"Fiscalizacao","Serviços de projeto":"Projeto","Fornecimento de bens":"Fornecimento","Concessões":"Concessoes","Alterações de procedimento":"Alteracoes","Outros":"Outros"};
@@ -1148,6 +1181,41 @@ function cStatusTxt(){
   st.innerHTML=esc(txt)+((atraso>=2&&CMETA.diag)?
     `<div style="margin-top:5px;color:#b3540a;font-size:12px;line-height:1.5">⚠ contratos com ${atraso} dias de atraso — diagnóstico do robô: ${esc(CMETA.diag)}</div>`:``);
 }
+// Mostra, em cartõezinhos, quantos contratos existem em cada um dos últimos 10 dias.
+// Serve para se ver num relance se falta algum dia (e esse pode ser importado à mão no GitHub).
+function cDiasBar(){
+  const el=document.getElementById("cDias"); if(!el) return;
+  const {max}=cDatasMinMax(); if(!max){ el.innerHTML=""; return; }
+  const cont={}; CREGS.forEach(r=>{ cont[r.data]=(cont[r.data]||0)+1; });
+  const t=new Date();
+  const hojeIso=`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`;
+  const fim = max>hojeIso ? max : hojeIso;
+  const its=[]; 
+  for(let i=9;i>=0;i--){
+    const iso=menosDias(fim,i);
+    const dia=new Date(iso+"T12:00:00").getDay();
+    // o dia de hoje ainda pode não ter publicações — não conta como falta
+    its.push({iso,n:cont[iso]||0,fds:(dia===0||dia===6||iso>=hojeIso)});
+  }
+  const sel=o=>(CF.de===o.iso&&CF.ate===o.iso);
+  el.innerHTML=`<span class="cdias-t">Cobertura dos últimos 10 dias:</span>`+
+    its.map(o=>{
+      const cls="cdia"+(o.n?"":(o.fds?" fds":" falta"))+(sel(o)?" activo":"");
+      const tt=o.n?`${o.n} contratos publicados em ${dmy(o.iso)} — clique para ver só este dia`
+                 :(o.iso>=hojeIso?`${dmy(o.iso)}: ainda sem publicações (o dia ainda vai a meio)`
+                 :(o.fds?`${dmy(o.iso)}: fim-de-semana, é normal não haver publicações`
+                        :`${dmy(o.iso)}: sem contratos — pode importar este dia à mão no GitHub`));
+      return `<button class="${cls}" data-d="${o.iso}" title="${esc(tt)}">${o.iso.slice(8)}/${o.iso.slice(5,7)}<b>${o.n||"—"}</b></button>`;
+    }).join("")+
+    (its.some(o=>!o.n&&!o.fds)
+      ? `<div class="cdias-av">⚠ Dias úteis sem contratos: ${its.filter(o=>!o.n&&!o.fds).map(o=>dmy(o.iso)).join(", ")}. Para os importar: GitHub → Actions → «Atualizar e publicar Anúncios DR» → «Run workflow» → escreva a data (aaaa-mm-dd) no campo «dia».</div>`
+      : ``);
+  el.querySelectorAll(".cdia").forEach(b=>b.onclick=()=>{
+    const d=b.dataset.d;
+    if(CF.de===d&&CF.ate===d) cDatasDefeito(), cRender();
+    else cAplicarPeriodo(d,d);
+  });
+}
 function cRender(){
   if(!cCarregado) return;
   const arr=cFiltrados();
@@ -1195,6 +1263,7 @@ function cRender(){
     cont.appendChild(div);
   });
   document.getElementById("cVazio").style.display=algum?"none":"block";
+  cDiasBar();
 }
 function cInitEventos(){
   document.getElementById("cDe").onchange=e=>{CF.de=e.target.value;cRender();};

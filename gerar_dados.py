@@ -4,11 +4,12 @@
 # Fonte 2: Diário da República (site) via Playwright — dias mais recentes.
 import json, gzip, datetime, urllib.request, sys, os, re, asyncio
 
-VERSAO = "9.4"          # versão da app/dados (aparece na página)
+VERSAO = "9.6"          # versão da app/dados (aparece na página)
 DATASET_ID = "66d72fbc58cd7a63dae28712"
 JANELA_DIAS = 120
 CTR_DATASET = "66d72d488ca4b7cb2de28712"   # Contratos Públicos - Portal BASE - IMPIC (contratos{ano}.zip)
 JANELA_CTR = 30                             # janela de contratos (dias) — ~800-1100/dia
+DIAS_CTR_VIVO = 10      # contratos: quantos dias recentes se varrem ao vivo em cada corrida
 KEEP = {"Anúncio de procedimento", "Anúncio de concurso urgente", "Anúncio de Alteração"}
 
 import unicodedata as _ud
@@ -564,78 +565,178 @@ def _base_call(data, timeout=30):
     _diag("todos os transportes falharam: "+" | ".join(erros))
     raise RuntimeError("base.gov.pt inacessível: "+" | ".join(erros))
 
-def contratos_vivo(desde, max_det=500, max_pag=200, seg_busca=600, seg_det=780):
-    """Contratos publicados a partir de «desde» (dias em falta depois do ficheiro oficial),
-    via pesquisa do base.gov.pt SEM filtro de datas (com filtro o servidor demora ~20-30s por página;
-    sem filtro demora ~1-2s). Varre por ordem -publicationDate e pára ao chegar a dias já cobertos.
-    Para cada contrato pede o detalhe (local de execução, CPV, tipo) — limitado a max_det pedidos."""
+SITE_CTR = "https://safsmachado.github.io/anuncios-dr/contratos.json.gz"
+_QBASE = "tipo=0&tipocontrato=0&pais=187&distrito=0&concelho=0"
+
+def carregar_publicado():
+    """Contratos já publicados no site (acumulados das corridas anteriores).
+    É isto que impede que se perca o que já foi recolhido quando a fonte falha."""
+    try:
+        req=urllib.request.Request(SITE_CTR, headers={"User-Agent":"Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=120) as r:
+            obj=json.loads(gzip.decompress(r.read()).decode("utf-8"))
+        regs=obj.get("regs") or []
+        _diag(f"acumulado do site: {len(regs)} contratos até {obj.get('ate')}")
+        return regs
+    except Exception as e:
+        _diag(f"sem acumulado do site ({type(e).__name__})")
+        return []
+
+def _ctr_pagina(dia, page):
+    """Uma página de resultados de UM dia (o filtro de datas usa o formato aaaa-mm-dd)."""
+    q=f"{_QBASE}&desdedatapublicacao={dia}&atedatapublicacao={dia}"
+    return _base_call({"type":"search_contratos","version":"91.0","query":q,
+                       "sort":"-publicationDate","page":page,"size":50}, 90)
+
+def _ctr_item(it):
+    cid=it.get("id")
+    return {"n":cid,"data":iso2(it.get("publicationDate","")),
+       "ent":_txt(it.get("contracting")),"adj":_txt(it.get("contracted")),
+       "obj":_txt(it.get("objectBriefDescription"))[:300],
+       "preco":_preco_eur(it.get("initialContractualPrice")),
+       "cpv":[],"tipo":"","proc":it.get("contractingProcedureType"),
+       "prazo":"","cel":iso2(it.get("signingDate","") or ""),
+       "cat":_ctr_cat(_txt(it.get("objectBriefDescription")), [], []),
+       "local":"","dist":"","conc":[],"url":_ctr_url(cid)}
+
+def contratos_vivo_dias(dias, ja, seg_busca=1500, max_pag_dia=60, forcar=False):
+    """Vai buscar, DIA A DIA, so os contratos que faltam. Para cada dia o servidor diz
+    quantos tem no total: se ja temos esse numero, o dia e saltado sem gastar tempo.
+    forcar=True (importacao manual de um dia) varre o dia mesmo que pareca completo.
+    Um dia que falhe NAO cancela os restantes: so 3 falhas seguidas param a busca."""
     import time
-    t0=time.time()
-    out=[]; ndet=0; vistos_1a=[]
-    q="tipo=0&tipocontrato=0&pais=187&distrito=0&concelho=0"
-    # 1ª fase — varrer as páginas de resultados (rápido); sem detalhes, para nunca ficar sem contratos
-    for page in range(max_pag):
+    t0=time.time(); novos=[]; vistos=set()
+    tenho={}
+    for r in ja.values():
+        if r.get("data"): tenho[r["data"]]=tenho.get(r["data"],0)+1
+    falhas=0
+    for dia in dias:
         if time.time()-t0>seg_busca:
-            _diag(f"busca ao vivo parada por tempo ({int(time.time()-t0)}s) na página {page}"); break
-        d=_base_call({"type":"search_contratos","version":"91.0","query":q,"sort":"-publicationDate","page":page,"size":50})
-        items=d.get("items") or []
-        if page==0:
-            vistos_1a=[iso2(x.get("publicationDate","")) or "?" for x in items[:3]]
-            _diag(f"base.gov respondeu: total={d.get('total')}, 1ª página começa em {', '.join(vistos_1a) or '(vazia)'} (procuro >= {desde})")
-        if not items: break
-        antigos=0
-        for it in items:
-            dp=iso2(it.get("publicationDate",""))
-            if not dp or dp<desde:
-                antigos+=1; continue
-            cid=it.get("id")
-            out.append({"n":cid,"data":dp,
-               "ent":_txt(it.get("contracting")),"adj":_txt(it.get("contracted")),
-               "obj":_txt(it.get("objectBriefDescription"))[:300],
-               "preco":_preco_eur(it.get("initialContractualPrice")),
-               "cpv":[],"tipo":"","proc":it.get("contractingProcedureType"),
-               "prazo":"","cel":iso2(it.get("signingDate","") or ""),
-               "cat":_ctr_cat(_txt(it.get("objectBriefDescription")), [], []),
-               "local":"","dist":"","conc":[],"url":_ctr_url(cid)})
-        if page%10==0: log(f"contratos vivo: página {page}, acumulado {len(out)}")
-        if antigos==len(items): break    # página inteira já antes de «desde» ⇒ terminámos
-    # 2ª fase — detalhes (local de execução, CPV, tipo, CONCORRENTES), do mais recente para trás
-    for b in sorted(out, key=lambda x:(x["data"], str(x["n"])), reverse=True):
-        if ndet>=max_det or time.time()-t0>seg_det: break
+            _diag(f"tempo esgotado na busca (faltou {dia} e seguintes)"); break
         try:
-            det=_base_call({"type":"detail_contratos","version":"91.0","id":b["n"]}); ndet+=1
+            d0=_ctr_pagina(dia,0); falhas=0
+        except Exception as e:
+            falhas+=1
+            _diag(f"{dia}: pesquisa falhou ({type(e).__name__})")
+            if falhas>=3:
+                _diag("3 dias seguidos a falhar - busca ao vivo interrompida"); break
+            continue
+        total=int(d0.get("total") or 0)
+        if total and not forcar and tenho.get(dia,0)>=total:
+            continue
+        _diag(f"{dia}: servidor {total}, tinha {tenho.get(dia,0)}")
+        pags=min(max_pag_dia, max(1,(total+49)//50))
+        for page in range(pags):
+            if time.time()-t0>seg_busca:
+                _diag(f"tempo esgotado em {dia}, pagina {page}"); break
+            d=None
+            for tentativa in (1,2):                      # uma segunda tentativa antes de desistir da pagina
+                try:
+                    d=d0 if page==0 else _ctr_pagina(dia,page); break
+                except Exception as e:
+                    if tentativa==2: _diag(f"{dia} pag {page}: {type(e).__name__}")
+                    else: time.sleep(3)
+            if d is None: break
+            items=d.get("items") or []
+            if not items: break
+            for it in items:
+                r=_ctr_item(it)
+                if r["n"] and r["data"] and r["n"] not in ja and r["n"] not in vistos:
+                    vistos.add(r["n"]); novos.append(r)
+        log(f"contratos vivo {dia}: acumulado novo {len(novos)}")
+    _diag(f"ao vivo: +{len(novos)} contratos novos ({int(time.time()-t0)}s)")
+    return novos
+
+def contratos_detalhes(regs, max_det=400, seg_det=420, prio=None):
+    """Detalhe (local, CPV, tipo, prazo, CONCORRENTES) dos que ainda não o têm, do mais recente para trás."""
+    import time
+    t0=time.time(); n=0; falhas=0
+    for b in regs:                                   # quem ja tem detalhe fica marcado de vez
+        if not b.get("det") and (b.get("local") or b.get("cpv")): b["det"]=1
+    alvo=[b for b in regs if not b.get("det")]
+    prio=set(prio or ())                             # dias pedidos à mão vão à frente
+    alvo.sort(key=lambda x:(1 if x.get("data") in prio else 0, x.get("data") or "", str(x.get("n"))),
+              reverse=True)
+    for b in alvo:
+        if n>=max_det or time.time()-t0>seg_det: break
+        try:
+            det=_base_call({"type":"detail_contratos","version":"91.0","id":b["n"]}); n+=1; falhas=0
             if det.get("cpvs"): b["cpv"]=[f"{det.get('cpvs')} - {det.get('cpvsDesignation') or ''}".strip(" -")[:80]]
             b["tipo"]=(det.get("contractTypes") or "")[:80]
             b["prazo"]=re.sub(r"\D","",str(det.get("executionDeadline") or "")) or ""
             loc,dist=ctr_local([det.get("executionPlace") or ""])
             b["local"]=loc[:90]; b["dist"]=dist
             b["conc"]=_conc_lista(det.get("contestants") or det.get("invitees"))
-            b["cat"]=_ctr_cat(b["obj"], b["cpv"], [b["tipo"]] if b["tipo"] else [])
+            b["cat"]=_ctr_cat(b.get("obj",""), b["cpv"], [b["tipo"]] if b["tipo"] else [])
+            b["det"]=1
         except Exception as e:
-            if ndet==0: _diag(f"detalhes indisponíveis: {type(e).__name__}")
-            break
-    _diag(f"ao vivo: +{len(out)} contratos desde {desde} ({ndet} com detalhe, {int(time.time()-t0)}s)")
-    return out
+            falhas+=1
+            if falhas>=4:
+                _diag(f"detalhes interrompidos apos 4 falhas ({type(e).__name__})"); break
+    _diag(f"detalhes: +{n} em {int(time.time()-t0)}s (faltavam {len(alvo)})")
+
+def _dias_pedidos():
+    """Dias pedidos a mao no GitHub (Actions -> Run workflow -> campo "dia").
+    Aceita 2026-07-27, ou varios separados por virgula/espaco. Tambem aceita 27-07-2026."""
+    txt=(os.environ.get("DIA_CTR") or "").strip()
+    if not txt: return []
+    out=[]
+    for p in re.split(r"[,;\s]+", txt):
+        p=p.strip()
+        if not p: continue
+        m=re.match(r"^(\d{2})[-/](\d{2})[-/](\d{4})$", p)
+        if m: p=f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
+        try:
+            datetime.date.fromisoformat(p)
+        except Exception:
+            _diag(f"data manual ignorada (formato invalido): {p}"); continue
+        if p not in out: out.append(p)
+    return sorted(out)
 
 def gerar_contratos(hoje):
+    porN={}
+    def juntar(r, forte=False):
+        if not r.get("n") or not r.get("data"): return
+        old=porN.get(r["n"])
+        if old is None: porN[r["n"]]=dict(r); return
+        for k,v in r.items():
+            if v in (None,"",[]): continue
+            if forte or old.get(k) in (None,"",[]): old[k]=v
+    # 1) o que já estava publicado no site (nunca se perde nada entre corridas)
+    for r in carregar_publicado(): juntar(r)
+    # 2) ficheiro oficial do IMPIC (manda sobre tudo o resto)
     corte_prov=(hoje-datetime.timedelta(days=JANELA_CTR+7)).isoformat()
     anos=sorted({(hoje-datetime.timedelta(days=JANELA_CTR+7)).year, hoje.year})
-    ctr=[]
+    maxof=None
     for ano in anos:
         log(f"A obter contratos {ano}…")
         try:
             parte=contratos_oficial(ano, corte_prov)
             log(f"contratos oficial {ano}: {len(parte)}")
-            ctr+=parte
+            for r in parte:
+                juntar(r, forte=True)
+                if r.get("data") and (maxof is None or r["data"]>maxof): maxof=r["data"]
         except Exception as e:
             log(f"contratos oficial {ano} falhou:", repr(e))
-    maxof=max((r["data"] for r in ctr if r.get("data")), default=None)
     if maxof: _diag(f"ficheiro oficial IMPIC vai até {maxof}")
-    # complemento ao vivo para os dias em falta (normalmente só hoje; até 10 dias se o oficial parar)
+    # 3) complemento ao vivo (base.gov.pt), dia a dia, só do que falta
+    pedido=_dias_pedidos()
     try:
-        ini=(datetime.date.fromisoformat(maxof)+datetime.timedelta(days=1)) if maxof else (hoje-datetime.timedelta(days=2))
-        if ini<=hoje:
-            ctr+=contratos_vivo(max(ini,hoje-datetime.timedelta(days=10)).isoformat())
+        if pedido:
+            # importação manual: exactamente estes dias, à força, mesmo que pareçam completos
+            dias=pedido
+            _diag("importação manual pedida: "+", ".join(dias))
+        else:
+            dias=[]
+            for i in range(0, DIAS_CTR_VIVO):        # só os últimos 10 dias
+                d=(hoje-datetime.timedelta(days=i)).isoformat()
+                if maxof and d<=maxof: continue
+                dias.append(d)
+            dias=dias[:1]+list(reversed(dias[1:]))   # hoje primeiro; depois do mais antigo para o mais novo
+        if dias:
+            novos=contratos_vivo_dias(dias, porN, forcar=bool(pedido))
+            for r in novos: juntar(r)
+            contratos_detalhes(list(porN.values()), prio=pedido)
         else:
             _diag("oficial já está em dia — sem complemento ao vivo")
     except Exception as e:
@@ -643,17 +744,16 @@ def gerar_contratos(hoje):
     finally:
         _pw_fechar()
     log(f"contratos: transporte base.gov = {_MODO_BASE}")
-    if not ctr:
+    if not porN:
         log("contratos: nada obtido — contratos.json.gz não escrito"); return
-    ultimo=max(r["data"] for r in ctr if r["data"])
+    ultimo=max(r["data"] for r in porN.values() if r.get("data"))
     corte=(datetime.date.fromisoformat(ultimo)-datetime.timedelta(days=JANELA_CTR)).isoformat()
-    porN={}
-    for r in ctr:                # o oficial vem primeiro ⇒ prioridade sobre o «vivo»
-        if r.get("data") and r["data"]>=corte: porN.setdefault(r["n"], r)
-    jan=sorted(porN.values(), key=lambda x:(x["data"], str(x["n"])))
+    manual=set(pedido)                                # um dia pedido à mão nunca é cortado pela janela
+    jan=sorted([r for r in porN.values() if r.get("data") and (r["data"]>=corte or r["data"] in manual)],
+               key=lambda x:(x["data"], str(x["n"])))
     de=min(r["data"] for r in jan); ate=max(r["data"] for r in jan)
     obj={"ver":VERSAO,"gerado":hoje.isoformat(),"hora":hora_lisboa(),"de":de,"ate":ate,"janela":JANELA_CTR,
-         "diag":" | ".join(CTR_DIAG[-8:]),"regs":jan}
+         "diag":" | ".join(CTR_DIAG[-10:]),"regs":jan}
     with gzip.open(os.path.join(os.path.dirname(os.path.abspath(__file__)),"contratos.json.gz"),"wb") as f:
         f.write(json.dumps(obj, ensure_ascii=False).encode("utf-8"))
     log(f"Escrito contratos.json.gz: {len(jan)} contratos, {de}..{ate}")
