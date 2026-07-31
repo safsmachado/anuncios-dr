@@ -4,12 +4,15 @@
 # Fonte 2: Diário da República (site) via Playwright — dias mais recentes.
 import json, gzip, datetime, urllib.request, sys, os, re, asyncio
 
-VERSAO = "9.6"          # versão da app/dados (aparece na página)
+VERSAO = "9.7"          # versão da app/dados (aparece na página)
 DATASET_ID = "66d72fbc58cd7a63dae28712"
 JANELA_DIAS = 120
 CTR_DATASET = "66d72d488ca4b7cb2de28712"   # Contratos Públicos - Portal BASE - IMPIC (contratos{ano}.zip)
 JANELA_CTR = 30                             # janela de contratos (dias) — ~800-1100/dia
 DIAS_CTR_VIVO = 10      # contratos: quantos dias recentes se varrem ao vivo em cada corrida
+CAU_MIN = 5_000_000     # so se le a caucao dos contratos a partir deste valor (euros)
+CAU_MAX_DOCS = 8        # quantos contratos grandes se analisam em cada corrida
+CAU_SEG = 700           # tempo maximo (segundos) para toda a fase da caucao
 KEEP = {"Anúncio de procedimento", "Anúncio de concurso urgente", "Anúncio de Alteração"}
 
 import unicodedata as _ud
@@ -588,6 +591,25 @@ def _ctr_pagina(dia, page):
     return _base_call({"type":"search_contratos","version":"91.0","query":q,
                        "sort":"-publicationDate","page":page,"size":50}, 90)
 
+_ANU_CACHE={}
+def _anuncio_dados(aid):
+    """Preco base e numero do anuncio que deu origem ao contrato.
+    O mesmo anuncio serve varios contratos, por isso fica guardado em memoria."""
+    if not aid: return None
+    if aid in _ANU_CACHE: return _ANU_CACHE[aid]
+    r=None
+    try:
+        a=_base_call({"type":"detail_anuncios","version":"91.0","id":aid})
+        r={"base":_preco_eur(a.get("basePrice")), "num":_txt(a.get("announcementNumber"))[:20]}
+        if not r["base"] and not r["num"]: r=None
+    except Exception:
+        r=None
+    _ANU_CACHE[aid]=r
+    return r
+
+def _doc_url(did):
+    return f"https://www.base.gov.pt/Base4/pt/resultados/?type=doc_documentos&id={did}" if did else ""
+
 def _ctr_item(it):
     cid=it.get("id")
     return {"n":cid,"data":iso2(it.get("publicationDate","")),
@@ -667,6 +689,12 @@ def contratos_detalhes(regs, max_det=400, seg_det=420, prio=None):
             loc,dist=ctr_local([det.get("executionPlace") or ""])
             b["local"]=loc[:90]; b["dist"]=dist
             b["conc"]=_conc_lista(det.get("contestants") or det.get("invitees"))
+            docs=det.get("documents") or []
+            b["doc"]=(docs[0].get("id") if docs and isinstance(docs[0],dict) else "") or ""
+            an=_anuncio_dados(det.get("announcementId"))
+            if an:
+                if an.get("base"): b["base"]=an["base"]
+                if an.get("num"): b["anum"]=an["num"]
             b["cat"]=_ctr_cat(b.get("obj",""), b["cpv"], [b["tipo"]] if b["tipo"] else [])
             b["det"]=1
         except Exception as e:
@@ -674,6 +702,128 @@ def contratos_detalhes(regs, max_det=400, seg_det=420, prio=None):
             if falhas>=4:
                 _diag(f"detalhes interrompidos apos 4 falhas ({type(e).__name__})"); break
     _diag(f"detalhes: +{n} em {int(time.time()-t0)}s (faltavam {len(alvo)})")
+
+# ---------------------------------------------------------------------------
+# CAUCAO / GARANTIA BANCARIA dos contratos de valor elevado
+# So para contratos a partir de CAU_MIN euros (sao poucos: ~1 a 2 por dia).
+# Descarrega o PDF do contrato publicado no BASE, le o texto e, se o PDF for
+# uma digitalizacao (sem texto), passa-o por OCR. Depois procura a clausula da
+# caucao e retira a modalidade (garantia bancaria, seguro-caucao, deposito,
+# retencao) e o valor ou a percentagem.
+# ---------------------------------------------------------------------------
+_CAU_ACHA = re.compile(r"cau[c¢ge][ao@]{0,2}[o0]|garant\w*\s+banc|seguro[\s\-]{0,2}cau", re.I)
+_CAU_VAL  = re.compile(r"\d{1,3}(?:[.\s]\d{3})+,\d{2}\s*(?:€|eur)", re.I)
+_CAU_PCT  = re.compile(r"\d{1,2}(?:,\d{1,2})?\s*%")
+
+def _pdf_texto(raw, seg=240):
+    """Texto de um PDF. Primeiro tenta o texto embutido; se nao houver (contrato
+    digitalizado), faz OCR das paginas. Devolve (texto, 'texto'|'ocr'|'')."""
+    import io, time, shutil, subprocess, tempfile, glob
+    try:
+        from pypdf import PdfReader
+        rd=PdfReader(io.BytesIO(raw))
+        t="".join((pg.extract_text() or "") for pg in rd.pages)
+        npag=len(rd.pages)
+    except Exception as e:
+        _diag(f"caucao: PDF ilegivel ({type(e).__name__})"); return "",""
+    if len(t.strip())>400:
+        return re.sub(r"\s+"," ",t), "texto"
+    if not (shutil.which("pdftoppm") and shutil.which("tesseract")):
+        return "",""
+    t0=time.time(); saida=[]
+    lang="por" if "por" in (subprocess.run(["tesseract","--list-langs"],capture_output=True,text=True).stdout or "") else "eng"
+    with tempfile.TemporaryDirectory() as d:
+        f=f"{d}/c.pdf"
+        open(f,"wb").write(raw)
+        try:
+            subprocess.run(["pdftoppm","-r","150","-gray","-png","-l","40",f,f"{d}/pg"],
+                           timeout=min(180,seg), check=True, capture_output=True)
+        except Exception as e:
+            _diag(f"caucao: OCR nao converteu o PDF ({type(e).__name__})"); return "",""
+        for img in sorted(glob.glob(f"{d}/pg-*.png")):
+            if time.time()-t0>seg: break
+            try:
+                r=subprocess.run(["tesseract",img,"-","-l",lang],timeout=60,capture_output=True,text=True)
+                saida.append(r.stdout or "")
+            except Exception:
+                pass
+    txt=re.sub(r"\s+"," ","".join(saida))
+    return (txt,"ocr") if len(txt.strip())>200 else ("","")
+
+def _sem_acentos(t):
+    """Tira acentos mantendo o mesmo numero de caracteres (para as posicoes baterem certo)."""
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", t) if not unicodedata.combining(c))
+
+def _cau_modalidade(j):
+    j=_sem_acentos(j).lower()
+    if re.search(r"dispensad\w*\s+(?:a\s+)?(?:prestac\w+\s+de\s+)?cau|nao\s+(?:e|foi|sera)\s+(?:exig\w+|prestada)\s+cau", j):
+        return "sem caução (dispensada)"
+    if re.search(r"garant\w*\s+banc", j):        return "garantia bancária"
+    if re.search(r"seguro[\s\-]{0,2}cau", j):    return "seguro-caução"
+    if re.search(r"dep[o0][s5]ito", j):          return "depósito em dinheiro"
+    if re.search(r"reten[c¢][ao][o0]|desconto\s+de|deduc|deduz", j): return "retenção nos pagamentos"
+    if re.search(r"t[i1]tulo[s5]?\s+de\s+d[i1]v[i1]da", j): return "títulos de dívida pública"
+    return ""
+
+def _cau_extrair(txt):
+    """Escolhe o trecho do contrato que melhor descreve a caucao."""
+    melhor=None; mscore=-1
+    plano=_sem_acentos(txt)
+    for m in _CAU_ACHA.finditer(plano):
+        a=max(0,m.start()-200); b=m.start()+700
+        j=plano[a:b]; orig=txt[a:b]
+        sc=0
+        if _CAU_VAL.search(j): sc+=3
+        if _CAU_PCT.search(j): sc+=2
+        mod=_cau_modalidade(j)
+        # uma garantia a serio (bancaria, seguro, deposito) vale mais do que uma simples retencao
+        if mod in ("garantia bancária","seguro-caução","depósito em dinheiro","títulos de dívida pública"): sc+=5
+        elif mod: sc+=1
+        if re.search(r"prest\w+\s+(?:um[a]?\s+)?cau|cau[ccç¢]\w*\s+prestad", j, re.I): sc+=3
+        if re.search(r"cl[aá]usula[^.]{0,40}cau", j, re.I): sc+=2
+        if re.search(r"caucion", j, re.I): sc+=1
+        if sc>mscore: mscore, melhor = sc, orig
+    if melhor is None or mscore<1: return None
+    val=_CAU_VAL.search(melhor); pct=_CAU_PCT.search(melhor)
+    v=[]
+    if val: v.append(re.sub(r"\s+"," ",val.group(0)).replace("EUR","€").strip())
+    if pct: v.append(pct.group(0).replace(" ",""))
+    return {"m":_cau_modalidade(melhor), "v":" · ".join(v),
+            "t":re.sub(r"\s+"," ",melhor).strip()[:600]}
+
+def contratos_caucao(regs, minimo=None, max_docs=None, seg=None):
+    """Le a caucao dos contratos acima de CAU_MIN que ainda nao foram analisados."""
+    import time, urllib.request
+    minimo   = CAU_MIN      if minimo   is None else minimo
+    max_docs = CAU_MAX_DOCS if max_docs is None else max_docs
+    seg      = CAU_SEG      if seg      is None else seg
+    alvo=[b for b in regs if (b.get("preco") or 0)>=minimo and not b.get("cauf")]
+    alvo.sort(key=lambda x:(x.get("data") or ""), reverse=True)
+    if not alvo:
+        return
+    t0=time.time(); n=0
+    for b in alvo[:max_docs]:
+        if time.time()-t0>seg:
+            _diag("caucao: tempo esgotado"); break
+        if not b.get("doc"):
+            b["cauf"]=1; b["cau"]={"m":"","v":"","t":"","f":"sem-documento"}; continue
+        try:
+            req=urllib.request.Request(_doc_url(b["doc"]), headers={"User-Agent":"Mozilla/5.0"})
+            raw=urllib.request.urlopen(req, timeout=120).read()
+        except Exception as e:
+            _diag(f"caucao {b['n']}: descarga falhou ({type(e).__name__})"); continue
+        if raw[:4]!=b"%PDF":
+            b["cauf"]=1; b["cau"]={"m":"","v":"","t":"","f":"nao-e-pdf"}; continue
+        txt,fonte=_pdf_texto(raw, seg=max(60, int((seg-(time.time()-t0))/2)))
+        n+=1
+        if not txt:
+            b["cauf"]=1; b["cau"]={"m":"","v":"","t":"","f":"nao-legivel"}; continue
+        r=_cau_extrair(txt)
+        b["cauf"]=1
+        b["cau"]=dict(r, f=fonte) if r else {"m":"","v":"","t":"","f":fonte+"-sem-mencao"}
+        log(f"caucao {b['n']}: {b['cau'].get('m') or '-'} {b['cau'].get('v') or ''} ({b['cau']['f']})")
+    _diag(f"caucao: {n} contratos grandes lidos ({int(time.time()-t0)}s, faltavam {len(alvo)})")
 
 def _dias_pedidos():
     """Dias pedidos a mao no GitHub (Actions -> Run workflow -> campo "dia").
@@ -736,13 +886,20 @@ def gerar_contratos(hoje):
         if dias:
             novos=contratos_vivo_dias(dias, porN, forcar=bool(pedido))
             for r in novos: juntar(r)
-            contratos_detalhes(list(porN.values()), prio=pedido)
         else:
             _diag("oficial já está em dia — sem complemento ao vivo")
     except Exception as e:
         _diag(f"complemento ao vivo indisponível: {type(e).__name__} {str(e)[:100]}")
-    finally:
-        _pw_fechar()
+    # detalhes e caução correm sempre, mesmo que não tenha havido dias novos a varrer
+    try:
+        contratos_detalhes(list(porN.values()), prio=pedido)
+    except Exception as e:
+        _diag(f"detalhes indisponíveis: {type(e).__name__} {str(e)[:80]}")
+    try:
+        contratos_caucao(list(porN.values()))
+    except Exception as e:
+        _diag(f"caução indisponível: {type(e).__name__} {str(e)[:80]}")
+    _pw_fechar()
     log(f"contratos: transporte base.gov = {_MODO_BASE}")
     if not porN:
         log("contratos: nada obtido — contratos.json.gz não escrito"); return

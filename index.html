@@ -173,6 +173,21 @@
   .det-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(255px,1fr));gap:10px 26px;font-size:13px}
   .det-grid div b{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:2px}
   .det-grid .full{grid-column:1/-1}
+  .det-grid .mini{font-weight:400;color:var(--muted);font-size:11.5px}
+  /* concorrentes: um por linha, com o adjudicatario destacado */
+  .conc-lista{margin:4px 0 0;padding-left:22px}
+  .conc-lista li{padding:2px 0;line-height:1.35}
+  .conc-lista li.venc{font-weight:600;color:var(--forn)}
+  .conc-lista li.venc::after{content:" · adjudicatário";font-weight:400;font-size:11px;color:var(--muted)}
+  /* caucao / garantia dos contratos de valor elevado */
+  .cau-box{background:#fff8e8;border:1px solid #ecd9a8;border-radius:10px;padding:10px 12px}
+  .cau-l{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:2px 0 6px}
+  .cau-tag{background:var(--forn);color:#fff;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:600}
+  .cau-val{font-weight:700;font-size:14.5px}
+  .cau-tx{font-size:12.5px;color:#444;font-style:italic;line-height:1.45;background:#fff;
+    border-left:3px solid #ecd9a8;padding:6px 10px;border-radius:0 6px 6px 0}
+  .cau-nd{font-size:12.5px;color:var(--muted)}
+  .cau-pe{font-size:11px;color:var(--muted);margin-top:6px}
   .obs-caixa{grid-column:1/-1}
   .obs-caixa textarea{width:100%;min-height:64px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;
     font-family:inherit;font-size:13px;resize:vertical;background:#fffdf3}
@@ -343,14 +358,14 @@
     <div id="cVazio" style="display:none">Sem resultados para o período/filtros/pesquisa actuais.</div>
 
     <p class="nota">
-      <b>Contratos públicos celebrados</b>, publicados diariamente no Portal BASE (base.gov.pt). Clique no cabeçalho de um grupo para o minimizar/abrir; clique numa linha para ver toda a informação do contrato (adjudicatário, CPV, prazo, local de execução, datas). O link «BASE» abre a ficha oficial do contrato no portal. A lista guarda os <b>últimos 30 dias</b> de publicações; ao abrir mostra os últimos 3 dias. A <b>barra de cobertura</b> por baixo mostra quantos contratos existem em cada um dos últimos 10 dias — clique num dia para ver só esse. Se algum dia útil aparecer a vermelho (sem contratos), pode mandar buscá-lo à mão: <b>GitHub → Actions → «Atualizar e publicar Anúncios DR» → «Run workflow»</b> e escrever a data (aaaa-mm-dd) no campo «dia».<br>
+      <b>Contratos públicos celebrados</b>, publicados diariamente no Portal BASE (base.gov.pt). Clique no cabeçalho de um grupo para o minimizar/abrir; clique numa linha para ver toda a informação do contrato: adjudicatário, <b>preço base do procedimento</b> e desconto face a ele, CPV, prazo, local de execução, datas e a <b>lista de concorrentes</b> (o adjudicatário aparece destacado a verde). Nos contratos <b>a partir de 5 milhões</b>, o robô descarrega o contrato em PDF do BASE e lê a cláusula da caução, indicando a modalidade (garantia bancária, seguro-caução, depósito, retenção) e o valor ou a percentagem, com o trecho do contrato onde isso vem escrito. O link «BASE» abre a ficha oficial do contrato no portal. A lista guarda os <b>últimos 30 dias</b> de publicações; ao abrir mostra os últimos 3 dias. A <b>barra de cobertura</b> por baixo mostra quantos contratos existem em cada um dos últimos 10 dias — clique num dia para ver só esse. Se algum dia útil aparecer a vermelho (sem contratos), pode mandar buscá-lo à mão: <b>GitHub → Actions → «Atualizar e publicar Anúncios DR» → «Run workflow»</b> e escrever a data (aaaa-mm-dd) no campo «dia».<br>
       <b>Fonte:</b> dados oficiais do Portal BASE / IMPIC (dados.gov.pt), completados ao dia com o próprio base.gov.pt.
     </p>
   </div><!-- /vistaContratos -->
 </main>
 
 <script>
-const APP_VER="9.6";        // versão da aplicação (mostrada no canto superior direito)
+const APP_VER="9.7";        // versão da aplicação (mostrada no canto superior direito)
 let META={ver:"",gerado:"",hora:"",de:"",ate:"",janela:120,n:0};
 const CATS=["Obras","Serviços","Serviços de fiscalização","Serviços de projeto","Fornecimento de bens","Concessões","Alterações de procedimento","Outros"];
 const CLS={"Obras":"Obras","Serviços":"Servicos","Serviços de fiscalização":"Fiscalizacao","Serviços de projeto":"Projeto","Fornecimento de bens":"Fornecimento","Concessões":"Concessoes","Alterações de procedimento":"Alteracoes","Outros":"Outros"};
@@ -1128,16 +1143,58 @@ function cOrdenar(arr){
     return x<y?-1*cOrdDir:x>y?1*cOrdDir:0;
   });
 }
+/* nome «achatado» (sem acentos, sem pontuacao) para comparar concorrente com adjudicatario */
+function cChave(t){
+  return (t||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .toLowerCase().replace(/\b(lda|ldª|s\.?a|unipessoal|sociedade|grupo|e|de|da|do|dos|das)\b/g," ")
+    .replace(/[^a-z0-9]+/g," ").trim();
+}
+/* bloco da caucao: so aparece nos contratos a partir de 5 milhoes */
+function cCaucao(r){
+  if((r.preco||0) < 5000000) return "";
+  const c=r.cau, doc=r.doc
+    ? ` <a class="dr" href="https://www.base.gov.pt/Base4/pt/resultados/?type=doc_documentos&id=${encodeURIComponent(r.doc)}" target="_blank" rel="noopener">abrir o contrato (PDF) ↗</a>`
+    : "";
+  let corpo;
+  if(!c){
+    corpo=`<div class="cau-nd">Ainda por analisar — o robô lê o contrato numa das próximas atualizações.</div>`;
+  }else if(c.m||c.v){
+    corpo=`<div class="cau-l">`+
+      (c.m?`<span class="cau-tag">${esc(c.m)}</span>`:`<span class="cau-tag" style="background:var(--outros)">modalidade não indicada</span>`)+
+      (c.v?`<span class="cau-val">${esc(c.v)}</span>`:``)+`</div>`+
+      (c.t?`<div class="cau-tx">“…${esc(c.t)}…”</div>`:``);
+  }else{
+    const m={"sem-documento":"O Portal BASE não publicou o documento do contrato.",
+             "nao-e-pdf":"O documento publicado não está em PDF legível.",
+             "nao-legivel":"O contrato está digitalizado e não foi possível ler o texto.",
+             "texto-sem-mencao":"O contrato publicado não menciona caução — é frequente ficar remetida para o caderno de encargos.",
+             "ocr-sem-mencao":"O contrato publicado não menciona caução — é frequente ficar remetida para o caderno de encargos."};
+    corpo=`<div class="cau-nd">${m[c.f]||"Não foi possível apurar."}</div>`;
+  }
+  const ocr=(c&&c.f==="ocr")?" Contrato digitalizado: lido por reconhecimento de texto, convém confirmar no PDF.":"";
+  return `<div class="full cau-box"><b>Caução / garantia (contrato ≥ 5 M€)</b>${corpo}`+
+         `<div class="cau-pe">Leitura automática do contrato publicado no BASE.${ocr}${doc}</div></div>`;
+}
 function cDetGrid(r){
   const li=(t,v)=>v?`<div><b>${t}</b><div>${v}</div></div>`:"";
+  const kadj=cChave(r.adj);
+  const venc=c=>{ const k=cChave(c); return k && kadj && (kadj.indexOf(k)>=0 || k.indexOf(kadj)>=0); };
   const conc=(r.conc&&r.conc.length)
-    ? `<div class="full"><b>Concorrentes ao procedimento (${r.conc.length})</b><div>${r.conc.map(c=>esc(c)).join(" · ")}</div></div>`
+    ? `<div class="full"><b>Concorrentes ao procedimento (${r.conc.length})</b><ol class="conc-lista">${
+        r.conc.map(c=>`<li class="${venc(c)?"venc":""}">${esc(c)}</li>`).join("")}</ol></div>`
     : `<div class="full"><b>Concorrentes ao procedimento</b><div>— sem lista publicada no BASE (habitual em ajustes diretos) —</div></div>`;
+  // desconto (ou acréscimo) do preço contratual face ao preço base do anúncio
+  let dif="";
+  if(r.base && r.preco){
+    const p=(r.preco-r.base)/r.base*100;
+    if(Math.abs(p)>=0.05) dif=` <span class="mini">(${p<0?"−":"+"}${Math.abs(p).toFixed(1).replace(".",",")}% face ao preço base)</span>`;
+  }
   return `<div class="det-grid">`+
     li("Objeto do contrato", esc(r.obj||"—"))+
     li("Adjudicante", esc(r.ent||"—"))+
     li("Adjudicatário(s)", esc(r.adj||"—"))+
-    li("Preço contratual", eur(r.preco))+
+    li("Preço base do procedimento", r.base?eur(r.base)+(r.anum?` <span class="mini">(anúncio ${esc(r.anum)})</span>`:``):"— não publicado —")+
+    li("Preço contratual", eur(r.preco)+dif)+
     li("Tipo(s) de contrato", esc(r.tipo||"—"))+
     li("Procedimento", esc(r.proc||"—"))+
     li("CPV", esc((r.cpv||[]).join(" · ")||"—"))+
@@ -1147,6 +1204,7 @@ function cDetGrid(r){
     li("Prazo de execução", r.prazo?esc(r.prazo)+" dias":"—")+
     li("Ficha no Portal BASE", r.url?`<a class="dr" href="${esc(r.url)}" target="_blank" rel="noopener">Abrir no BASE ↗</a>`:"—")+
     conc+
+    cCaucao(r)+
     `</div>`;
 }
 function cLinha(r){
