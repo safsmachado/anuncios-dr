@@ -18,6 +18,7 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  actions: write      # para o passo «Manter o agendamento vivo»
 
 concurrency:
   group: "pages"
@@ -61,3 +62,14 @@ jobs:
           path: _site
       - id: deploy
         uses: actions/deploy-pages@v4
+      # O GitHub desliga os agendamentos ao fim de 60 dias sem alterações no repositório
+      # (foi o que parou os anúncios a 29/09/2026). Reactivar pela API repõe esse prazo,
+      # por isso cada execução renova os dois agendamentos e isto nunca mais pára sozinho.
+      - name: Manter o agendamento vivo
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for f in workflow.yml atualizar.yml; do
+            gh api -X PUT "repos/${{ github.repository }}/actions/workflows/$f/enable" || echo "nao consegui reactivar $f"
+          done
